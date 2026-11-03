@@ -1,0 +1,19 @@
+# Private sandbox demo only. Free instance data is ephemeral.
+services:
+  - type: web
+    name: shaadi-sync-demo
+    runtime: python
+    plan: free
+    buildCommand: python -m py_compile server.py
+    startCommand: python server.py
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: DEMO_MODE
+        value: "1"
+      - key: DATABASE_PATH
+        value: /tmp/shaadi-demo.sqlite3
+      - key: DEMO_ACCESS_PASSWORD
+        generateValue: true

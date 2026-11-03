@@ -47,3 +47,13 @@ This is a first working prototype, **not the complete production specification**
 Demo login deliberately permits choosing any seeded role. **Do not expose this server to untrusted users or store actual guest/ID information.** `DEMO_MODE=0` disables role switching, but does not make sandbox OTP production safe. Before deployment replace sandbox authentication with a verified SMS provider, bind users to event-scoped membership, use expiring durable sessions, secure cookies behind HTTPS, rate limits and CSRF protection, robust schema validation, transactional check-ins and approvals, migrations/backups, and a production application server.
 
 Sessions expire after 24 hours and are invalidated on logout. Sessions and pending OTPs are memory-only; application data persists in SQLite. Processes must be restarted in a new environment. Use the existing checkout; no worktree is needed. No environment configuration was published or modified as part of this application build.
+
+## Open a private hosted demo with Render
+
+This repository includes `render.yaml` for a **free-tier sandbox demo**. Connect this repository in Render's Blueprint workflow. After deployment, Render supplies the actual HTTPS application URL. No public deployment has been made merely by adding this file.
+
+The site is password protected when `DEMO_ACCESS_PASSWORD` is set. On Render, open the service's Environment settings to retrieve the generated value securely. Use browser login **`demo`** and that password. Do not paste the password into chat or commit it. The health endpoint remains public for platform probes and returns no event data.
+
+The free instance uses an ephemeral SQLite database: demo edits may disappear on restart/redeploy, and sessions expire on restart. It may sleep while idle. Use sample data only; this is a private demonstration, not production hosting. Automatic deployments are disabled in this blueprint.
+
+For a local password-protected run, supply `DEMO_ACCESS_PASSWORD` through your process environment and start `python server.py`. Without the variable, local development keeps its existing behaviour.
