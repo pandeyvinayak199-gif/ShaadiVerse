@@ -193,41 +193,46 @@ class Handler(SimpleHTTPRequestHandler):
     def can_manage(self,kind):
         self.require_role('Super Organiser','Co-Organiser')
         if self.s['role']=='Co-Organiser' and kind not in self.s['permissions'] and not self.s['demo_role']:raise HTTPError(403,'Your organiser has not granted this permission.')
-    def events(self):
+    def events(self,c=None):
         if not self.s:raise HTTPError(401,'Please sign in')
-        with conn() as c:
-            if self.s['demo_role']:items=[dict(json.loads(r['data']),id=r['id']) for r in c.execute("SELECT * FROM records WHERE kind='event'")]
-            else:items=[dict(json.loads(r['data']),id=r['id']) for r in c.execute("SELECT r.* FROM records r JOIN memberships m ON m.event_id=r.event_id WHERE r.kind='event' AND m.phone=? AND m.revoked=0",(self.s['phone'],))]
-            items=[e for e in items if e.get('demoWorkspace')==self.s['phone']] if self.s['demo_role'] else [e for e in items if not e.get('demoWorkspace')]
-            return [{k:e.get(k) for k in ['id','name','date','venue','plan']} for e in items]
+        if c is None:
+            with conn() as db:return self.events(db)
+        if self.s['demo_role']:items=[dict(json.loads(r['data']),id=r['id']) for r in c.execute("SELECT * FROM records WHERE kind='event'")]
+        else:items=[dict(json.loads(r['data']),id=r['id']) for r in c.execute("SELECT r.* FROM records r JOIN memberships m ON m.event_id=r.event_id WHERE r.kind='event' AND m.phone=? AND m.revoked=0",(self.s['phone'],))]
+        items=[e for e in items if e.get('demoWorkspace')==self.s['phone']] if self.s['demo_role'] else [e for e in items if not e.get('demoWorkspace')]
+        return [{k:e.get(k) for k in ['id','name','date','venue','plan']} for e in items]
     def state(self):
+        if not self.s:raise HTTPError(401,'Please sign in')
+        with conn() as c:return self.state_with_connection(c)
+    def state_with_connection(self,c):
         if not self.s:raise HTTPError(401,'Please sign in')
         s=self.s;eid=s['event_id'];role=s['role']
         user={k:s.get(k) for k in ['name','phone','role','event_id','permissions']};user['demo']=bool(s['demo_role'])
-        data={'user':user,'events':self.events(),'csrf':s['csrf'],'mode':'sandbox' if demo_mode() else 'live','services':{'sms':providers.sms_ready(),'whatsapp':providers.whatsapp_ready(),'payments':providers.payments_ready()},'event':[],'scope':hash_token(str(eid)+':'+s['phone']),'release':'investor-pilot'}
+        data={'user':user,'events':self.events(c),'csrf':s['csrf'],'mode':'sandbox' if demo_mode() else 'live','services':{'sms':providers.sms_ready(),'whatsapp':providers.whatsapp_ready(),'payments':providers.payments_ready()},'event':[],'scope':hash_token(str(eid)+':'+s['phone']),'release':'investor-pilot'}
         if not eid:return data
         kinds=['event','timeline','announcements','polls']
         if role=='Super Organiser':kinds+=ALLOWED+['joins','entries','members','expenses']
         elif role=='Co-Organiser':kinds+=[k for k in ALLOWED+['joins','entries'] if s['demo_role'] or k in s['permissions']]
         elif role=='Finance Team':kinds+=['expenses']
         elif role=='Guest':kinds+=['transport']
-        data.update({k:rows(k,eid) for k in set(kinds)})
+        data.update({k:rows(k,eid,c) for k in set(kinds)})
         if not data['event']:raise HTTPError(404,'Event no longer exists')
         for p in data['polls']:p['hasVoted']=s['phone'] in p.get('voters',[]);p.pop('voters',None)
         if role=='Guest':
-            gs=[g for g in rows('guests',eid) if owns_guest(g,s)]
+            gs=[g for g in rows('guests',eid,c) if owns_guest(g,s)]
             data['guests']=gs
             invited=set(gs[0].get('events',[])) if gs else set()
             data['timeline']=[t for t in data['timeline'] if t['name'] in invited]
-        if role=='Vendor':data['vendors']=[v for v in rows('vendors',eid) if v['id']==s.get('entity_id') or (s['demo_role'] and v==rows('vendors',eid)[0])]
-        if role=='Hotel Partner':data['hotels']=[h for h in rows('hotels',eid) if h['id']==s.get('entity_id') or (s['demo_role'] and h==rows('hotels',eid)[0])]
+        if role=='Vendor':
+            vendors=rows('vendors',eid,c);data['vendors']=[v for v in vendors if v['id']==s.get('entity_id') or (s['demo_role'] and v==vendors[0])]
+        if role=='Hotel Partner':
+            hotels=rows('hotels',eid,c);data['hotels']=[h for h in hotels if h['id']==s.get('entity_id') or (s['demo_role'] and h==hotels[0])]
         if role not in ['Super Organiser','Finance Team']:
             for e in data['event']:e.pop('budget',None);e.pop('approvalThreshold',None)
         for g in data.get('guests',[]):g.pop('passNonce',None)
         if role=='Super Organiser':
-            with conn() as c:
-                data['team']=[dict(r) for r in c.execute('SELECT phone,role,permissions,revoked FROM memberships WHERE event_id=?',(eid,))]
-                data['messages']=[dict(r) for r in c.execute('SELECT id,guest_id,status,error,created FROM outbox WHERE event_id=? ORDER BY id DESC LIMIT 50',(eid,))]
+            data['team']=[dict(r) for r in c.execute('SELECT phone,role,permissions,revoked FROM memberships WHERE event_id=?',(eid,))]
+            data['messages']=[dict(r) for r in c.execute('SELECT id,guest_id,status,error,created FROM outbox WHERE event_id=? ORDER BY id DESC LIMIT 50',(eid,))]
         return data
     def login_session(self,phone,name,demo_role=None,reset_demo=False):
         token=secrets.token_urlsafe(32);csrf=secrets.token_urlsafe(24)
@@ -241,9 +246,9 @@ class Handler(SimpleHTTPRequestHandler):
                     phone='demo:'+secrets.token_hex(16)
                     seed=demo_records();event=seed['event'][0];event.update(demoWorkspace=phone,code='DEMO-'+secrets.token_hex(5).upper(),demoCreated=time.time())
                     eid=insert(c,'event',event,0);c.execute('UPDATE records SET event_id=? WHERE id=?',(eid,eid));c.execute('INSERT INTO event_codes VALUES(?,?)',(event['code'],eid))
-                    for kind,items in seed.items():
-                        if kind!='event':
-                            for item in items:insert(c,kind,item,eid)
+                    batch=[(kind,json.dumps(item,allow_nan=False),eid) for kind,items in seed.items() if kind!='event' for item in items]
+                    if isinstance(c,storage.PGConnection):c.raw.cursor().executemany('INSERT INTO records(kind,data,event_id) VALUES(%s,%s,%s)',batch)
+                    else:c.executemany('INSERT INTO records(kind,data,event_id) VALUES(?,?,?)',batch)
                 if self.s:c.execute('DELETE FROM sessions WHERE token_hash=?',(self.s['token_hash'],))
             if not demo_role:
                 c.execute('INSERT INTO users(phone,name,created) VALUES(?,?,?) ON CONFLICT(phone) DO NOTHING',(phone,name,time.time()))

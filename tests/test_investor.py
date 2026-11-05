@@ -5,6 +5,16 @@ import server,manage
 class InvestorRelease(WorkflowCase):
  def demo(self,role='Super Organiser',cookie=None):
   status,data,new=self.req('auth/demo',{'role':role},cookie);self.assertEqual(status,200,data);return new
+ def test_signed_out_startup_does_not_open_database(self):
+  with patch('server.conn',wraps=server.conn) as connections:
+   self.assertEqual(self.req('state')[0],401)
+   self.assertEqual(connections.call_count,0)
+ def test_dashboard_reuses_database_connection(self):
+  cookie=self.demo()
+  with patch('server.conn',wraps=server.conn) as connections:
+   self.assertEqual(self.req('state',cookie=cookie)[0],200)
+   # One connection resolves the session, one assembles the entire response.
+   self.assertEqual(connections.call_count,2)
  def test_visitors_have_isolated_sample_data(self):
   a=self.demo();b=self.demo();sa=self.req('state',cookie=a)[1];sb=self.req('state',cookie=b)[1]
   self.assertNotEqual(sa['event'][0]['id'],sb['event'][0]['id']);self.assertEqual(len(sa['guests']),12);self.assertEqual(len(sb['guests']),12)

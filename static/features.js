@@ -7,16 +7,16 @@ api=async function(path,body){
  if(!response.ok){let e=Error(data.error||'The request failed.');e.status=response.status;throw e}
  if(data.csrf)csrfToken=data.csrf;return data;
 };
-refresh=async function(){
+refresh=async function({throwOnError=false}={}){
  try{
   state=await api('state');
   const role=state.user.role;
-  if(!state.event.length){accountHome();return}
+  if(!state.event.length){accountHome();return state}
   const pages={Guest:['Passport','Timeline','Celebrations'],Vendor:['Vendors','Timeline'],'Hotel Partner':['Travel & stay','Timeline'],'Finance Team':['Expenses','Timeline']};
   if(pages[role]&&!pages[role].includes(page))page=pages[role][0];
   if(role==='Super Organiser'&&['Passport'].includes(page))page='Overview';
-  render();
- }catch(e){if(e.status===401)login();else if(!navigator.onLine)offlineGate();else toast(e.message)}
+  render();return state;
+ }catch(e){if(throwOnError)throw e;if(e.status===401)login();else if(!navigator.onLine)offlineGate();else toast(e.message)}
 };
 login=function(){
  const demos=bootstrap.demoMode?`<div class="welcome-note">Explore with sample data. Demo sign-in never sends SMS or payments.</div><button class="primary" onclick="demo('Super Organiser')">Explore Rahul & Priya’s wedding →</button><div class="divider">TRY ANOTHER DEMO ROLE</div><div class="role-grid">${['Co-Organiser','Finance Team','Vendor','Guest','Hotel Partner'].map(r=>`<button onclick="demo('${r}')">${r}</button>`).join('')}</div><div class="divider">OR CREATE YOUR OWN CELEBRATION</div>`:'';
@@ -161,4 +161,3 @@ logout=async function(){await api('auth/logout',{});csrfToken='';state={};stopCa
 async function boot(){
  try{bootstrap=await api('bootstrap');await refresh();if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});}catch(e){if(!navigator.onLine)offlineGate();else toast('Unable to connect. Please refresh the page.')}
 }
-boot();

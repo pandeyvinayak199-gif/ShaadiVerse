@@ -2,7 +2,7 @@
 const featureLogin=login,featureRender=render,featureSettings=settings;
 login=function(){
  if(!bootstrap.demoMode)return featureLogin();
- $('#app').innerHTML=`<div class="login investor-login"><section class="login-art"><div class="brand" style="color:#fff1dc"><em>❋</em> shaadi sync</div><div class="eyebrow" style="color:#e7c78d;margin-top:48px">LESS CHAOS. MORE CELEBRATION.</div><h1 style="margin-top:18px">Big celebrations.<br>Beautifully<br>in sync.</h1><p>One joyful home for your people, plans, and every little detail. Built for weddings. Made for togetherness.</p><div class="demo-trust"><span>♧ Guests & RSVP</span><span>▦ Personal entry passes</span><span>♡ Every family detail</span></div></section><section class="login-panel"><div class="login-box"><div class="eyebrow">INVESTOR & PILOT EDITION · 1.0</div><h1>A front-row seat<br>to the celebration.</h1><p class="subtitle">Step inside Rahul & Priya’s wedding. Your sample workspace is private to this browser session.</p><div class="welcome-note">Interactive demonstration · No messages sent · No payments charged. Use fictional details during the pilot.</div><button class="primary" onclick="demo('Super Organiser')">Explore Rahul & Priya’s wedding →</button><button class="secondary" style="width:100%;margin-top:12px" onclick="startPresentation()">✧ Take the five-minute walkthrough</button><div class="divider">SEE IT THROUGH THEIR EYES</div><div class="role-grid">${['Guest','Co-Organiser','Finance Team','Vendor','Hotel Partner'].map(r=>`<button onclick="demo('${r}')">${r}</button>`).join('')}</div><p class="subtitle" style="margin-top:24px">Try the experience, then share your thoughts in the pilot survey. Responses are research feedback, not customer traction.</p>${bootstrap.sandboxOtpAvailable?'<details style="margin-top:20px"><summary>Private developer phone sandbox</summary><button class="text-link" onclick="featureLogin()">Open developer sign-in</button></details>':''}</div></section></div>`;
+ $('#app').innerHTML=`<div class="login investor-login"><section class="login-art"><div class="brand" style="color:#fff1dc"><em>❋</em> shaadi sync</div><div class="eyebrow" style="color:#e7c78d;margin-top:48px">LESS CHAOS. MORE CELEBRATION.</div><h1 style="margin-top:18px">Big celebrations.<br>Beautifully<br>in sync.</h1><p>One joyful home for your people, plans, and every little detail. Built for weddings. Made for togetherness.</p><div class="demo-trust"><span>♧ Guests & RSVP</span><span>▦ Personal entry passes</span><span>♡ Every family detail</span></div></section><section class="login-panel"><div class="login-box"><div class="eyebrow">INVESTOR & PILOT EDITION · 1.0</div><h1>A front-row seat<br>to the celebration.</h1><p class="subtitle">Step inside Rahul & Priya’s wedding. Your sample workspace is private to this browser session.</p><div class="welcome-note">Interactive demonstration · No messages sent · No payments charged. Use fictional details during the pilot.</div><button class="primary" onclick="demo('Super Organiser')">Explore Rahul & Priya’s wedding →</button><button class="secondary" style="width:100%;margin-top:12px" id="start-walkthrough" onclick="startPresentation()">✧ Take the five-minute walkthrough</button><p id="walkthrough-status" class="subtitle" role="status" aria-live="polite" hidden></p><div class="divider">SEE IT THROUGH THEIR EYES</div><div class="role-grid">${['Guest','Co-Organiser','Finance Team','Vendor','Hotel Partner'].map(r=>`<button onclick="demo('${r}')">${r}</button>`).join('')}</div><p class="subtitle" style="margin-top:24px">Try the experience, then share your thoughts in the pilot survey. Responses are research feedback, not customer traction.</p>${bootstrap.sandboxOtpAvailable?'<details style="margin-top:20px"><summary>Private developer phone sandbox</summary><button class="text-link" onclick="featureLogin()">Open developer sign-in</button></details>':''}</div></section></div>`;
 };
 render=function(){
  featureRender();
@@ -46,12 +46,28 @@ const TOUR=[
  {page:'Overview',title:'The guest experience is part of the story.',body:'Use “Switch demo role” to explore the private guest passport and QR pass. Camera scans can be queued offline; entry is only approved after server verification.'}
 ];
 let tourIndex=0;
-async function startPresentation(){await demo('Super Organiser');beginTour()}
-function beginTour(){if(state.user.role!=='Super Organiser')return toast('Switch to the organiser demo to take the guided walkthrough.');tourIndex=0;tourStep()}
+let walkthroughStarting=false;
+async function startPresentation(){
+ if(walkthroughStarting)return;
+ walkthroughStarting=true;
+ const button=document.querySelector('#start-walkthrough'),status=document.querySelector('#walkthrough-status');
+ if(button){button.disabled=true;button.textContent='Preparing your walkthrough…';button.setAttribute('aria-busy','true')}
+ if(status){status.hidden=false;status.textContent='Opening your private sample wedding. A sleeping service may take a moment to wake up.'}
+ try{await demo('Super Organiser');await beginTour()}
+ catch(e){
+  if(status?.isConnected){status.hidden=false;status.setAttribute('role','alert');status.textContent='The walkthrough could not open: '+e.message+' Please try again.'}
+  else toast('The walkthrough could not open: '+e.message);
+ }finally{walkthroughStarting=false;if(button?.isConnected){button.disabled=false;button.removeAttribute('aria-busy');button.textContent='✧ Take the five-minute walkthrough'}}
+}
+async function beginTour(){
+ if(!state.user?.demo||!state.event?.length){await startPresentation();return}
+ if(state.user.role!=='Super Organiser')await demo('Super Organiser');
+ tourIndex=0;tourStep();
+}
 function tourStep(){
- const step=TOUR[tourIndex];nav(step.page);
+ const step=TOUR[tourIndex];if(!step)return;nav(step.page);
  modal(step.title,`<div class="tour-progress">${TOUR.map((_,i)=>`<i class="${i<=tourIndex?'active':''}"></i>`).join('')}</div><p class="subtitle">${esc(step.body)}</p><div class="form-actions"><button class="secondary" onclick="document.querySelector('dialog').close()">Explore this screen</button>${tourIndex?'<button class="secondary" onclick="tourIndex--;tourStep()">Back</button>':''}<button class="primary" onclick="${tourIndex===TOUR.length-1?'finishTour()':'tourIndex++;tourStep()'}">${tourIndex===TOUR.length-1?'Finish & share feedback':'Next moment →'}</button></div>`);
 }
 function finishTour(){$('#modal').close();feedbackForm()}
-demo=async function(role){await api('auth/demo',{role});page=role==='Guest'?'Passport':role==='Finance Team'?'Expenses':role==='Vendor'?'Vendors':role==='Hotel Partner'?'Travel & stay':'Overview';await refresh()};
-if(state.user)render();else if(bootstrap.demoMode!==undefined)login();
+demo=async function(role){await api('auth/demo',{role});page=role==='Guest'?'Passport':role==='Finance Team'?'Expenses':role==='Vendor'?'Vendors':role==='Hotel Partner'?'Travel & stay':'Overview';await refresh({throwOnError:true});if(!state.user?.demo||!state.event?.length)throw Error('The sample wedding did not load. Please reload the page.')};
+boot();

@@ -107,3 +107,7 @@ These five recommended upgrades are implemented in code and need the hosting/pro
 ## Local PostgreSQL validation
 
 The optional `tests/test_postgres.py` creates and drops only randomly named test databases on a disposable PostgreSQL server that you explicitly supply via `TEST_DATABASE_URL`; it requires CREATEDB privileges and must not point at a production service. The normal SQLite suite skips these four tests when no test server is supplied. Actual local PostgreSQL validation covers private-schema/RLS access, preserved legacy tables, survey/session persistence across initialization and concurrent duplicate gate checks. This does not verify the live Supabase account.
+
+## Walkthrough startup checks
+
+The walkthrough waits for the sample dashboard before opening, disables duplicate starts while loading, and leaves a visible retry message if loading fails. All presentation handlers are installed before bootstrap. Dashboard records share one database connection per response, and PostgreSQL sample inserts are batched. To exercise delayed loading and failure recovery, run `APP_URL=http://127.0.0.1:3004 node tests/browser-walkthrough.cjs` against a disposable demo instance.

@@ -11,6 +11,7 @@ class PGConnection:
         from psycopg.rows import dict_row
         from psycopg.conninfo import conninfo_to_dict
         options=conninfo_to_dict(url)
+        options.setdefault('connect_timeout','10')
         if options.get('host','') not in ['localhost','127.0.0.1','::1'] and not options.get('host','').startswith('/'):
             if options.get('sslmode','verify-full')!='verify-full':
                 raise ValueError('Remote PostgreSQL connections require sslmode=verify-full.')
