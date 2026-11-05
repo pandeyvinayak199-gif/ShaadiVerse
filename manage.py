@@ -1,5 +1,5 @@
 """Operator utilities. Backups contain personal data and must be stored securely."""
-import argparse, os, sqlite3, sys
+import argparse, csv, os, sqlite3, sys
 from pathlib import Path
 import server
 
@@ -22,9 +22,19 @@ def backup(target):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='command',required=True)
-    sub.add_parser('check');b=sub.add_parser('backup');b.add_argument('target')
+    sub.add_parser('check');survey=sub.add_parser('feedback-export');survey.add_argument('target');b=sub.add_parser('backup');b.add_argument('target')
     args=parser.parse_args()
     if args.command=='backup':backup(args.target);return
+    if args.command=='feedback-export':
+        fields=['source','rating','usefulness','willingness','persona','comments','created','updated']
+        with server.conn() as c:data=[dict(r) for r in c.execute('SELECT '+','.join(fields)+' FROM feedback ORDER BY id')]
+        fd=os.open(args.target,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(fd,'w',newline='') as f:
+            writer=csv.writer(f);writer.writerow(fields)
+            for row in data:
+                values=[row[k] for k in fields]
+                writer.writerow(["'"+str(v) if isinstance(v,str) and v[:1] in ['=','+','-','@','\t','\r'] else v for v in values])
+        print(str(len(data))+' survey responses exported privately. Responses are not unique-person or customer counts.');return
     server.initialize()
     with server.conn() as c:c.execute('SELECT 1').fetchone()
     print('Database connection and additive migrations: OK')

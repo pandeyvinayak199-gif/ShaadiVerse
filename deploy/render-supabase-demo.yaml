@@ -1,0 +1,26 @@
+# Free Render web service + YOUR existing Supabase PostgreSQL project.
+# Does not provision or purchase a database. Enter DATABASE_URL securely in Render.
+services:
+  - type: web
+    name: shaadi-sync-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: TRUST_PROXY
+        value: "1"
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: DEMO_MODE
+        value: "1"
+      - key: ALLOW_SANDBOX_OTP
+        value: "0"
+      - key: DATABASE_URL
+        sync: false
+      - key: DEMO_ACCESS_PASSWORD
+        generateValue: true

@@ -1,5 +1,5 @@
-const CACHE='shaadi-shell-v2';
-const SHELL=['/','/style.css','/app.js','/features.js','/palace.svg','/vendor/jsQR.js'];
+const CACHE='shaadi-shell-v3';
+const SHELL=['/','/style.css','/app.js','/features.js','/pilot.js','/palace.svg','/vendor/jsQR.js'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)));self.skipWaiting()});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim()});
 self.addEventListener('fetch',event=>{

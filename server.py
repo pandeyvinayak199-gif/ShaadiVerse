@@ -14,6 +14,7 @@ ROLES=['Super Organiser','Co-Organiser','Finance Team','Vendor','Guest','Hotel P
 ALLOWED=['guests','timeline','vendors','tasks','hotels','transport','catering','announcements','songs','photos','gifts','polls']
 CATALOG={'Event Pass':299900}  # INR paise, controlled by the server
 
+def sandbox_otp():return demo_mode() and os.environ.get('ALLOW_SANDBOX_OTP','0')=='1'
 def demo_mode():return os.environ.get('DEMO_MODE','0')=='1'
 def conn(write=False):return storage.connect(DB,write)
 def rows(kind,event_id=1,c=None):
@@ -35,11 +36,15 @@ def initialize():
         for event in c.execute("SELECT id,data,event_id FROM records WHERE kind='event'").fetchall():
             code=json.loads(event['data']).get('code')
             if code:c.execute('INSERT INTO event_codes VALUES(?,?) ON CONFLICT(code) DO NOTHING',(code,event['event_id']))
+            if event['event_id']==1 and code=='RAHUL-PRIYA-2026' and not c.execute("SELECT phone FROM memberships WHERE event_id=1 AND role='Super Organiser'").fetchone():
+                data=json.loads(event['data']);data['demoWorkspace']='legacy-demo';c.execute('UPDATE records SET data=? WHERE id=?',(json.dumps(data),event['id']))
         if demo_mode() and not c.execute('SELECT id FROM records LIMIT 1').fetchone():
             for kind,items in demo_records().items():
                 for item in items:
+                    if kind=='event':item['demoWorkspace']='legacy-demo'
                     record_id=insert(c,kind,item,1)
                     if kind=='event':c.execute('INSERT INTO event_codes VALUES(?,?)',(item['code'],1))
+def owns_guest(g,s):return g['id']==s.get('entity_id') if s.get('demo_role')=='Guest' else g.get('phone')==s['phone']
 def hash_token(t):return hashlib.sha256(t.encode()).hexdigest()
 def phone_number(raw):
     p=re.sub(r'[\s()-]','',str(raw))
@@ -66,12 +71,20 @@ def session_for(handler):
     with conn() as c:
         r=c.execute('SELECT * FROM sessions WHERE token_hash=? AND expires>?',(hash_token(token),time.time())).fetchone()
         if not r or (not demo_mode() and r['auth_mode']!='verified'):return None
+        if r['auth_mode']=='sandbox' and not r['demo_role'] and not sandbox_otp():return None
         s=dict(r);s['role']='Account';s['permissions']=[]
-        if s['demo_role'] and demo_mode():s['role']=s['demo_role'];s['entity_id']=None
+        if s['demo_role'] and demo_mode():
+            event=rows('event',s['event_id'],c)
+            if not event or event[0].get('demoWorkspace')!=s['phone']:return None
+            s['role']=s['demo_role'];s['entity_id']=None
+            if s['role']=='Guest':
+                guests=rows('guests',s['event_id'],c)
+                if guests:s['entity_id']=guests[0]['id']
         elif s['event_id']:
             m=c.execute('SELECT * FROM memberships WHERE event_id=? AND phone=? AND revoked=0',(s['event_id'],s['phone'])).fetchone()
             if m:s.update(role=m['role'],entity_id=m['entity_id'],permissions=json.loads(m['permissions']))
             else:s['event_id']=None
+            if s['event_id'] and any(e.get('demoWorkspace') for e in rows('event',s['event_id'],c)):s['event_id']=None
         return s
 class HTTPError(Exception):
     def __init__(self,status,message):self.status=status;super().__init__(message)
@@ -142,7 +155,7 @@ class Handler(SimpleHTTPRequestHandler):
                     if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),self.s['csrf']):raise HTTPError(403,'Refresh the page before making this request.')
                 return self.post(path,body)
             if path=='/api/health':return self.response(200,{'ok':True})
-            if path=='/api/bootstrap':return self.response(200,{'demoMode':demo_mode(),'smsReady':providers.sms_ready(),'whatsappReady':providers.whatsapp_ready(),'paymentsReady':providers.payments_ready()})
+            if path=='/api/bootstrap':return self.response(200,{'demoMode':demo_mode(),'smsReady':providers.sms_ready(),'whatsappReady':providers.whatsapp_ready(),'paymentsReady':providers.payments_ready(),'databaseConfigured':bool(os.environ.get('DATABASE_URL')),'release':'investor-pilot','version':'1.0','sandboxOtpAvailable':sandbox_otp()})
             if path=='/api/webhooks/whatsapp':
                 token=os.environ.get('WHATSAPP_VERIFY_TOKEN','')
                 if not token or query.get('hub.mode')!=['subscribe'] or not hmac.compare_digest(query.get('hub.verify_token',[''])[0],token):raise HTTPError(403,'Invalid verification token')
@@ -154,6 +167,9 @@ class Handler(SimpleHTTPRequestHandler):
                 if not found:raise HTTPError(404,'Invitation not found')
                 return self.response(200,{k:found[k] for k in ['id','name','date','venue','code']})
             if path=='/api/state':return self.response(200,self.state())
+            if path=='/api/integrations':
+                self.require_role('Super Organiser')
+                return self.response(200,self.integrations())
             if path=='/api/events':return self.response(200,{'events':self.events()})
             if path=='/api/audit':
                 self.require_role('Super Organiser','Finance Team')
@@ -180,14 +196,15 @@ class Handler(SimpleHTTPRequestHandler):
     def events(self):
         if not self.s:raise HTTPError(401,'Please sign in')
         with conn() as c:
-            if self.s['demo_role']:items=[dict(json.loads(r['data']),id=r['id']) for r in c.execute("SELECT * FROM records WHERE kind='event' AND event_id=1")]
+            if self.s['demo_role']:items=[dict(json.loads(r['data']),id=r['id']) for r in c.execute("SELECT * FROM records WHERE kind='event'")]
             else:items=[dict(json.loads(r['data']),id=r['id']) for r in c.execute("SELECT r.* FROM records r JOIN memberships m ON m.event_id=r.event_id WHERE r.kind='event' AND m.phone=? AND m.revoked=0",(self.s['phone'],))]
+            items=[e for e in items if e.get('demoWorkspace')==self.s['phone']] if self.s['demo_role'] else [e for e in items if not e.get('demoWorkspace')]
             return [{k:e.get(k) for k in ['id','name','date','venue','plan']} for e in items]
     def state(self):
         if not self.s:raise HTTPError(401,'Please sign in')
         s=self.s;eid=s['event_id'];role=s['role']
         user={k:s.get(k) for k in ['name','phone','role','event_id','permissions']};user['demo']=bool(s['demo_role'])
-        data={'user':user,'events':self.events(),'csrf':s['csrf'],'mode':'sandbox' if demo_mode() else 'live','services':{'sms':providers.sms_ready(),'whatsapp':providers.whatsapp_ready(),'payments':providers.payments_ready()},'event':[],'scope':hash_token(str(eid)+':'+s['phone'])}
+        data={'user':user,'events':self.events(),'csrf':s['csrf'],'mode':'sandbox' if demo_mode() else 'live','services':{'sms':providers.sms_ready(),'whatsapp':providers.whatsapp_ready(),'payments':providers.payments_ready()},'event':[],'scope':hash_token(str(eid)+':'+s['phone']),'release':'investor-pilot'}
         if not eid:return data
         kinds=['event','timeline','announcements','polls']
         if role=='Super Organiser':kinds+=ALLOWED+['joins','entries','members','expenses']
@@ -198,7 +215,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not data['event']:raise HTTPError(404,'Event no longer exists')
         for p in data['polls']:p['hasVoted']=s['phone'] in p.get('voters',[]);p.pop('voters',None)
         if role=='Guest':
-            gs=[g for g in rows('guests',eid) if g['phone']==s['phone']]
+            gs=[g for g in rows('guests',eid) if owns_guest(g,s)]
             data['guests']=gs
             invited=set(gs[0].get('events',[])) if gs else set()
             data['timeline']=[t for t in data['timeline'] if t['name'] in invited]
@@ -212,19 +229,31 @@ class Handler(SimpleHTTPRequestHandler):
                 data['team']=[dict(r) for r in c.execute('SELECT phone,role,permissions,revoked FROM memberships WHERE event_id=?',(eid,))]
                 data['messages']=[dict(r) for r in c.execute('SELECT id,guest_id,status,error,created FROM outbox WHERE event_id=? ORDER BY id DESC LIMIT 50',(eid,))]
         return data
-    def login_session(self,phone,name,demo_role=None):
+    def login_session(self,phone,name,demo_role=None,reset_demo=False):
         token=secrets.token_urlsafe(32);csrf=secrets.token_urlsafe(24)
         with conn(True) as c:
-            eid=1 if demo_role else None
+            eid=None
+            if demo_role:
+                if self.s and self.s.get('demo_role') and not reset_demo:
+                    eid=self.s['event_id'];phone=self.s['phone']
+                else:
+                    limit(c,'demo-start:'+self.client_identity(),60,3600)
+                    phone='demo:'+secrets.token_hex(16)
+                    seed=demo_records();event=seed['event'][0];event.update(demoWorkspace=phone,code='DEMO-'+secrets.token_hex(5).upper(),demoCreated=time.time())
+                    eid=insert(c,'event',event,0);c.execute('UPDATE records SET event_id=? WHERE id=?',(eid,eid));c.execute('INSERT INTO event_codes VALUES(?,?)',(event['code'],eid))
+                    for kind,items in seed.items():
+                        if kind!='event':
+                            for item in items:insert(c,kind,item,eid)
+                if self.s:c.execute('DELETE FROM sessions WHERE token_hash=?',(self.s['token_hash'],))
             if not demo_role:
                 c.execute('INSERT INTO users(phone,name,created) VALUES(?,?,?) ON CONFLICT(phone) DO NOTHING',(phone,name,time.time()))
                 # Pre-registered guests gain access only after verified phone ownership.
                 for r in c.execute("SELECT * FROM records WHERE kind='guests'").fetchall():
                     g=json.loads(r['data'])
-                    if g.get('phone')==phone:
+                    if g.get('phone')==phone and not any(e.get('demoWorkspace') for e in rows('event',r['event_id'],c)):
                         c.execute("INSERT INTO memberships(event_id,phone,role,entity_id,permissions) VALUES(?,?,?,?,?) ON CONFLICT(event_id,phone) DO NOTHING",(r['event_id'],phone,'Guest',r['id'],'[]'))
                 m=c.execute('SELECT event_id FROM memberships WHERE phone=? AND revoked=0 ORDER BY event_id LIMIT 1',(phone,)).fetchone()
-                if m:eid=m['event_id']
+                if m and not any(e.get('demoWorkspace') for e in rows('event',m['event_id'],c)):eid=m['event_id']
                 c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
             c.execute('INSERT INTO sessions VALUES(?,?,?,?,?,?,?,?)',(hash_token(token),phone,name,eid,csrf,time.time()+SESSION_TTL,demo_role,'sandbox' if demo_mode() else 'verified'))
         secure='; Secure' if os.environ.get('COOKIE_SECURE','0')=='1' else ''
@@ -235,7 +264,13 @@ class Handler(SimpleHTTPRequestHandler):
             role=b.get('role','Super Organiser')
             if role not in ROLES:raise ValueError('role')
             return self.login_session('9000000000','Ananya Sharma' if role=='Guest' else 'Priya Sharma',role)
+        if path=='/api/demo/reset':
+            self.require_role('Super Organiser')
+            if not self.s['demo_role']:raise HTTPError(403,'Only a demonstration workspace can be reset.')
+            return self.login_session('', 'Priya Sharma','Super Organiser',reset_demo=True)
+        if path=='/api/feedback':return self.submit_feedback(b)
         if path=='/api/auth/otp':
+            if demo_mode() and not sandbox_otp():raise HTTPError(403,'Phone sign-in is deferred. Explore an isolated demo workspace instead.')
             phone=phone_number(b.get('phone'));now=time.time()
             if not demo_mode() and not providers.sms_ready():raise providers.ProviderError('SMS verification is not configured. Connect Twilio Verify to sign in.')
             with conn(True) as c:
@@ -256,7 +291,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if not o or time.time()-o['created']>300 or o['attempts']>=5:raise HTTPError(400,'Request a new verification code.')
                 c.execute('UPDATE challenges SET attempts=attempts+1 WHERE phone=?',(phone,))
                 valid=bool(re.fullmatch(r'[0-9]{6}',code))
-                if o['mode']=='sandbox':valid=valid and demo_mode() and hmac.compare_digest(hmac.new(secret(c),code.encode(),hashlib.sha256).hexdigest(),o['code_hash'])
+                if o['mode']=='sandbox':valid=valid and sandbox_otp() and hmac.compare_digest(hmac.new(secret(c),code.encode(),hashlib.sha256).hexdigest(),o['code_hash'])
                 else:valid=valid and providers.sms_check(phone,code)
                 # Commit failed-attempt counters before reporting failure.
                 if valid:c.execute('DELETE FROM challenges WHERE phone=?',(phone,))
@@ -285,7 +320,7 @@ class Handler(SimpleHTTPRequestHandler):
         if path=='/api/rsvp' or path=='/api/guest-update':
             self.require_role('Guest')
             with conn(True) as c:
-                g=next((g for g in rows('guests',eid,c) if g['phone']==s['phone']),None)
+                g=next((g for g in rows('guests',eid,c) if owns_guest(g,s)),None)
                 if not g:raise HTTPError(404,'Guest not found')
                 if not b.get('consent'):raise HTTPError(400,'Explicit consent is required.')
                 if path=='/api/rsvp':
@@ -315,10 +350,11 @@ class Handler(SimpleHTTPRequestHandler):
         if path=='/api/save':return self.save_record(b)
         raise HTTPError(404,'Not found')
     def create_event(self,b):
-        if self.s['demo_role']:raise HTTPError(403,'Sign in with your phone account to create a personal event.')
+        if self.s['demo_role']:self.require_role('Super Organiser')
         name=text(b.get('name'),80);day=text(b.get('date'));date.fromisoformat(day)
         code=re.sub('[^A-Z0-9]+','-',name.upper()).strip('-')[:35]+'-'+day[:4]+'-'+secrets.token_hex(4).upper()
         e={'name':name,'date':day,'venue':text(b.get('venue'),150),'code':code,'budget':amount(b.get('budget',0)),'approvalThreshold':100000,'theme':b.get('theme','Royal Rajasthani'),'hashtag':'#'+re.sub('[^a-zA-Z0-9]','',name),'plan':'Free'}
+        if self.s['demo_role']:e.update(demoWorkspace=self.s['phone'],demoCreated=time.time(),plan='Event Pass')
         with conn(True) as c:
             limit(c,'create-event:'+self.s['phone'],10,86400)
             eid=insert(c,'event',e,0);c.execute('INSERT INTO event_codes VALUES(?,?)',(code,eid));c.execute('UPDATE records SET event_id=? WHERE id=?',(eid,eid))
@@ -420,7 +456,7 @@ class Handler(SimpleHTTPRequestHandler):
         with conn(True) as c:
             if rows('event',eid,c)[0]['plan']=='Free':raise HTTPError(402,'Ask your organiser to activate Event Pass for QR entry. Your invitation and RSVP remain available.')
             g=next((g for g in rows('guests',eid,c) if str(g['id'])==q.get('guestId',[''])[0]),None)
-            if not g or (self.s['role']=='Guest' and g['phone']!=self.s['phone']):raise HTTPError(404,'Guest pass not found')
+            if not g or (self.s['role']=='Guest' and not owns_guest(g,self.s)):raise HTTPError(404,'Guest pass not found')
             if g['status'] not in ['Confirmed','Checked In']:raise HTTPError(400,'Confirm your RSVP to receive a pass.')
             token=pass_token(c,eid,g)
         import qrcode, qrcode.image.svg
@@ -523,6 +559,27 @@ class Handler(SimpleHTTPRequestHandler):
         with conn() as c:p=c.execute("SELECT * FROM purchases WHERE event_id=? AND status='Paid' ORDER BY created DESC LIMIT 1",(self.s['event_id'],)).fetchone()
         if not p:raise HTTPError(404,'No completed purchase for this event.')
         return {'receipt':dict(p),'note':'Payment receipt. A GST tax invoice requires configured seller GST registration and billing details.'}
+    def submit_feedback(self,b):
+        if not self.s:raise HTTPError(401,'Open a demo or sign in before sharing feedback.')
+        if b.get('consent') is not True:raise HTTPError(400,'Consent is required to save survey feedback.')
+        rating=int(b.get('rating',0));usefulness=int(b.get('usefulness',0))
+        if not 1<=rating<=5 or not 1<=usefulness<=5:raise ValueError('Ratings must be 1–5')
+        willingness=b.get('willingness');persona=b.get('persona')
+        if willingness not in ['Yes','Maybe','No'] or persona not in ['Family organiser','Wedding planner','Guest','Vendor','Investor','Other']:raise ValueError('Survey options')
+        comments=b.get('comments','')
+        if not isinstance(comments,str) or len(comments)>2000:raise ValueError('Comment length')
+        with conn(True) as c:
+            actor=hmac.new(secret(c),('survey:'+self.s['phone']).encode(),hashlib.sha256).hexdigest()
+            limit(c,'survey:'+actor,10,3600)
+            now=time.time();source='demo' if self.s['demo_role'] else 'pilot'
+            c.execute('INSERT INTO feedback(actor_hash,source,event_id,rating,usefulness,willingness,persona,comments,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(actor_hash) DO UPDATE SET rating=excluded.rating,usefulness=excluded.usefulness,willingness=excluded.willingness,persona=excluded.persona,comments=excluded.comments,updated=excluded.updated',(actor,source,self.s['event_id'],rating,usefulness,willingness,persona,comments.strip(),now,now))
+        return self.response(200,{'ok':True,'message':'Thank you. Your feedback helps us understand the pilot experience.'})
+    def integrations(self):
+        return {'storage':{'provider':'Supabase / PostgreSQL' if os.environ.get('DATABASE_URL') else 'Local SQLite','status':'Database query verified' if os.environ.get('DATABASE_URL') else 'Persistent hosting setup needed'},'services':[
+            {'name':'Supabase database','configured':bool(os.environ.get('DATABASE_URL')),'settings':['DATABASE_URL','PGSSLROOTCERT (only if your project needs a downloaded CA)'],'steps':'In Supabase choose Connect → Session pooler. Enter the PostgreSQL connection string securely as DATABASE_URL in Render Environment; never use the public API URL as the database URL. Redeploy, then check the storage status here.','url':'https://supabase.com/dashboard'},
+            {'name':'Phone OTP · Twilio','configured':providers.sms_ready(),'settings':['TWILIO_ACCOUNT_SID','TWILIO_AUTH_TOKEN','TWILIO_VERIFY_SERVICE_SID'],'steps':'Deferred for this release. Connect Twilio Verify in hosting settings when ready. Demo mode never claims to verify phone ownership.','url':'https://console.twilio.com/'},
+            {'name':'WhatsApp Business','configured':providers.whatsapp_ready(),'settings':['WHATSAPP_ACCESS_TOKEN','WHATSAPP_PHONE_NUMBER_ID','WHATSAPP_TEMPLATE_NAME','WHATSAPP_APP_SECRET','WHATSAPP_VERIFY_TOKEN'],'steps':'Deferred. Approve your invitation template, add credentials in hosting settings and configure the signed webhook before enabling real messages.','url':'https://business.facebook.com/'},
+            {'name':'Payments · Razorpay','configured':providers.payments_ready(),'settings':['RAZORPAY_KEY_ID','RAZORPAY_KEY_SECRET','RAZORPAY_WEBHOOK_SECRET'],'steps':'Deferred. Use test keys and a captured-payment webhook first. This demonstration does not charge anyone.','url':'https://dashboard.razorpay.com/'}]}
     def webhook(self,path,raw):
         if path not in ['/api/webhooks/razorpay','/api/webhooks/whatsapp']:raise HTTPError(404,'Webhook not found')
         name='RAZORPAY_WEBHOOK_SECRET' if path.endswith('razorpay') else 'WHATSAPP_APP_SECRET'

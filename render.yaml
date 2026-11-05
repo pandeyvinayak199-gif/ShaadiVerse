@@ -1,4 +1,5 @@
-# Private sandbox demo only. Free instance data is ephemeral.
+# Investor/pilot demo. Set DATABASE_URL in Render to use Supabase permanently.
+# Without DATABASE_URL, the local fallback is ephemeral.
 services:
   - type: web
     name: shaadi-sync-demo
@@ -15,6 +16,8 @@ services:
         value: "1"
       - key: COOKIE_SECURE
         value: "1"
+      - key: ALLOW_SANDBOX_OTP
+        value: "0"
       - key: DEMO_MODE
         value: "1"
       - key: DATABASE_PATH

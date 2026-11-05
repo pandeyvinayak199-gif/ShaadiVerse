@@ -1,4 +1,11 @@
-# Shaadi Sync
+# Shaadi Sync · Investor & Pilot Edition 1.0
+
+The current release is an isolated, sample-data investor demonstration with a guided walkthrough, role switching, reset, consent-based pilot survey, and connect-later checklists. SMS, WhatsApp and payments are deferred.
+
+- **Connect your existing Supabase project to Render:** [step-by-step guide](docs/CONNECT_SUPABASE.md). A ChatGPT plugin connection alone does not connect hosting.
+- **Present and run a pilot survey:** [five-minute demo guide](docs/INVESTOR_DEMO.md).
+- **Optional new-service blueprint:** [Render + existing Supabase](deploy/render-supabase-demo.yaml). This provisions no paid database.
+
 
 A mobile-first wedding planner with event-isolated accounts, guest RSVP, a timeline, vendors, expenses, signed QR entry, team permissions, and live-service adapters. The existing hosted free demo remains a sandbox.
 
@@ -11,9 +18,9 @@ python -m pip install -r requirements.txt
 DEMO_MODE=1 python server.py
 ```
 
-Open the server on port **3000**. `DEMO_MODE=1` seeds Rahul & Priya only when the database is empty and explicitly enables sample-role sign-in and visible sandbox OTPs. Use the phone form to create a separate sandbox account and your own event. **Never treat a sandbox OTP as verified phone ownership.**
+Open the server on port **3000**. `DEMO_MODE=1` seeds Rahul & Priya only when the database is empty and explicitly enables sample-role sign-in and visible sandbox OTPs. Each browser visitor gets a separate sample wedding. Switch roles within that workspace and create additional fictional events from the event switcher. Public demo phone sign-in is disabled. Developers may explicitly set `ALLOW_SANDBOX_OTP=1` only for isolated authentication testing; **never treat that OTP as verified phone ownership.**
 
-For verified-user mode, use `DEMO_MODE=0` (the default), configure Twilio Verify, and use persistent storage. Live mode disables demo roles, does not return OTPs, and rejects sessions issued in sandbox mode. The server reads process variables; `.env.example` documents names but is not automatically loaded. Enter credentials in hosting settings, never in Git or chat.
+For verified-user mode, use `DEMO_MODE=0` (the default), configure Twilio Verify, and use persistent storage. Live mode disables demo roles, does not return OTPs, and rejects sessions issued in sandbox mode. App tables use the private `shaadi_sync` PostgreSQL schema with RLS and anonymous access revoked; recognised legacy app tables are migrated transactionally. No database password or provider key is exposed by the connection checklist. The server reads process variables; `.env.example` documents names but is not automatically loaded. Enter credentials in hosting settings, never in Git or chat.
 
 ## What is now implemented
 
@@ -27,9 +34,9 @@ For verified-user mode, use `DEMO_MODE=0` (the default), configure Twilio Verify
 
 ## Keep the free demo
 
-The root `render.yaml` still uses a **free** web service and an ephemeral database. It now installs the QR and PostgreSQL dependencies. It keeps demo mode, password protection and manual deployment. No paid plan is activated by this repository change. The Render-generated `DEMO_ACCESS_PASSWORD` protects the optional demo with username `demo`.
+The root `render.yaml` still uses a **free** web service. Set `DATABASE_URL` in Render to use your persistent Supabase database; without it, the local fallback is ephemeral. It now installs the QR and PostgreSQL dependencies. It keeps demo mode, password protection and manual deployment, and explicitly disables unverified sandbox phone sign-in. No paid plan is activated by this repository change. The Render-generated `DEMO_ACCESS_PASSWORD` protects the optional demo with username `demo`.
 
-To update that demo after code is pushed, use Render’s **Manual Deploy → Deploy latest commit**. The updated demo still may sleep and lose sample edits on restart. It is not durable hosting for real guests.
+To update that demo after code is pushed, use Render’s **Manual Deploy → Deploy latest commit**. The web service may sleep. Without `DATABASE_URL`, local sample edits and survey answers may be lost on restart. With Supabase, the stored data follows that database’s persistence/backup policy. The demo is intended for fictional event data and concept surveys, not production guest identity verification.
 
 ## Permanent storage: choose later
 
@@ -38,7 +45,7 @@ Both options are prepared; neither was purchased or activated:
 1. **Render disk:** `deploy/render-disk.yaml` describes a separate **paid starter** service with a 1 GB disk at `/var/data`. The database is `/var/data/shaadi.sqlite3`; demo mode is off. Import this blueprint only after deliberately choosing the paid service. Disk persistence is separate from backups. Keep one application instance for this SQLite configuration.
 2. **Existing PostgreSQL:** `deploy/render-postgres.yaml` uses a free web service with a database you supply separately through `DATABASE_URL`. It does not buy or create a database. Durability, expiration and backups depend on your chosen provider. Remote connections require `sslmode=verify-full`, using system certificate trust by default; supply the appropriate trusted CA through libpq settings for a private CA. Loopback development databases may omit TLS.
 
-Run `python manage.py check` against the intended configured database before use. SQLite migrations, backups and restart persistence are tested locally; no external PostgreSQL service was configured or validated in this workspace.
+Run `python manage.py check` against the intended configured database before use. SQLite migrations/backups and real local PostgreSQL migrations, private schema/RLS, session/survey restart persistence and concurrent admission are tested. Your actual Supabase connection still requires the secure Render setting; no external Supabase project was accessible in this workspace.
 
 ### Preserve data and back up
 
@@ -87,11 +94,16 @@ Optional browser validation (Playwright and Chromium required):
 ```sh
 # Start an isolated sample instance in a separate terminal:
 DEMO_MODE=1 DATABASE_PATH=/tmp/shaadi-browser.sqlite3 PORT=3001 python server.py
+APP_URL=http://127.0.0.1:3001 node tests/browser-investor.cjs
 APP_URL=http://127.0.0.1:3001 node tests/browser-features.cjs
 ```
 
-Use a fresh disposable database for each browser run: it creates accounts/events, assigns a team member and checks in sample guests. `CHROMIUM_PATH` overrides `/usr/bin/chromium`. This validates actual SVG encoding/decoding, mobile layout, online/duplicate/offline gate states, sync, account creation and invitations. Camera hardware permissions and real provider delivery still require device/account checks.
+Use a fresh disposable database for each browser run: the browser tests create sample events, assign a fictional team member, submit a consented survey and check in sample guests. `CHROMIUM_PATH` overrides `/usr/bin/chromium`. This validates actual SVG encoding/decoding, mobile layout, online/duplicate/offline gate states, sync, isolated visitor workspaces, demo event creation and invitations. Camera hardware permissions and real provider delivery still require device/account checks.
 
 ## Remaining original-brief work
 
 These five recommended upgrades are implemented in code and need the hosting/provider activation described above. This is still not every feature in the much larger original brief: seating drag-and-drop, ID/photo/contract/receipt uploads, per-guest hotel-room assignments, automatic personal-data deletion, Hindi translations, memory books, invitation animation, planner subscriptions, platform admin and marketplace features remain separate work. Offline scanning intentionally does not claim multi-device admission authority while disconnected.
+
+## Local PostgreSQL validation
+
+The optional `tests/test_postgres.py` creates and drops only randomly named test databases on a disposable PostgreSQL server that you explicitly supply via `TEST_DATABASE_URL`; it requires CREATEDB privileges and must not point at a production service. The normal SQLite suite skips these four tests when no test server is supplied. Actual local PostgreSQL validation covers private-schema/RLS access, preserved legacy tables, survey/session persistence across initialization and concurrent duplicate gate checks. This does not verify the live Supabase account.

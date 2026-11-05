@@ -5,7 +5,7 @@ import base64
 class AppTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
-  cls.demo=patch.dict(os.environ,{'DEMO_MODE':'1','DATABASE_URL':''});cls.demo.start();cls.temp=tempfile.TemporaryDirectory();server.DB=os.path.join(cls.temp.name,'test.sqlite3');server.initialize()
+  cls.demo=patch.dict(os.environ,{'DEMO_MODE':'1','ALLOW_SANDBOX_OTP':'1','DATABASE_URL':''});cls.demo.start();cls.temp=tempfile.TemporaryDirectory();server.DB=os.path.join(cls.temp.name,'test.sqlite3');server.initialize()
   cls.http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler);cls.base='http://127.0.0.1:'+str(cls.http.server_port)
   threading.Thread(target=cls.http.serve_forever,daemon=True).start()
  @classmethod
@@ -43,20 +43,20 @@ class AppTests(unittest.TestCase):
   for i in range(5):self.assertEqual(self.req('save',{'kind':'members','item':{'name':str(i),'phone':'988888880'+str(i),'role':'Finance Team'}},cookie)[0],200)
   self.assertEqual(self.req('save',{'kind':'members','item':{'name':'sixth','phone':'9888888899','role':'Finance Team'}},cookie)[0],400)
  def test_checkin_duplicate(self):
-  cookie=self.login('Super Organiser');g=next(x for x in server.rows('guests') if x['status']=='Confirmed')
+  cookie=self.login('Super Organiser');g=next(x for x in self.req('state',cookie=cookie)[1]['guests'] if x['status']=='Confirmed')
   self.assertEqual(self.req('checkin',{'guestId':g['id']},cookie)[0],200);self.assertEqual(self.req('checkin',{'guestId':g['id']},cookie)[0],409)
  def test_join_is_not_access(self):
   n=len(server.rows('guests'));self.assertEqual(self.req('join',{'code':'RAHUL-PRIYA-2026','name':'New Guest','phone':'9999999999'})[0],201);self.assertEqual(len(server.rows('guests')),n)
  def test_rsvp_limit(self):
   self.assertEqual(self.req('rsvp',{'status':'Confirmed','plusOnes':9,'consent':True},self.login('Guest'))[0],400)
  def test_finance_approval(self):
-  cookie=self.login('Finance Team');self.assertEqual(self.req('save',{'kind':'expenses','item':{'name':'Large','amount':200000,'paid':0}},cookie)[0],200);self.assertEqual(server.rows('expenses')[-1]['status'],'Needs Approval')
+  cookie=self.login('Finance Team');self.assertEqual(self.req('save',{'kind':'expenses','item':{'name':'Large','amount':200000,'paid':0}},cookie)[0],200);self.assertEqual(self.req('state',cookie=cookie)[1]['expenses'][-1]['status'],'Needs Approval')
  def test_travel_requires_consent(self):
   cookie=self.login('Guest')
   self.assertEqual(self.req('guest-update',{'travel':'Landed','consent':False},cookie)[0],400)
   self.assertEqual(self.req('guest-update',{'travel':'Landed','consent':True},cookie)[0],200)
  def test_one_vote_per_guest(self):
-  cookie=self.login('Guest');poll=server.rows('polls')[0];payload={'id':poll['id'],'option':'Team Bride'}
+  cookie=self.login('Guest');poll=self.req('state',cookie=cookie)[1]['polls'][0];payload={'id':poll['id'],'option':'Team Bride'}
   self.assertEqual(self.req('vote',payload,cookie)[0],200)
   self.assertEqual(self.req('vote',payload,cookie)[0],409)
   _,data,_=self.req('state',cookie=cookie);self.assertNotIn('voters',data['polls'][0])

@@ -53,8 +53,8 @@ function eventSwitcher(){
 }
 async function selectEvent(id){await api('events/select',{eventId:id});$('#modal').close();page='Overview';await refresh()}
 function createEventForm(){
- if(state.user?.demo){toast('Sign out and use phone sign-in to create your own celebration.');return}
- modal('Let’s make a little magic.',`<form>${field('Name of your event','name','text','')}${field('Date','date','date','')}${field('Venue','venue','text','')}${field('Overall budget (₹)','budget','number','0')}${field('Theme','theme','','Royal Rajasthani',['Royal Rajasthani','Pastel Beach','Boho Garden','Modern Minimal','Classic Gold'])}<p class="subtitle">Start free with up to 50 guests, RSVP and your timeline.</p>${formFooter('Create my celebration')}</form>`);
+ if(state.user?.demo&&state.user.role!=='Super Organiser'){toast('Switch to the organiser role to create a sample event.');return}
+ modal('Let’s make a little magic.',`<form>${field('Name of your event','name','text','')}${field('Date','date','date','')}${field('Venue','venue','text','')}${field('Overall budget (₹)','budget','number','0')}${field('Theme','theme','','Royal Rajasthani',['Royal Rajasthani','Pastel Beach','Boho Garden','Modern Minimal','Classic Gold'])}<p class="subtitle">${state.user?.demo?'This creates another fictional event in your private demo workspace. All demo features are available without payment.':'Start free with up to 50 guests, RSVP and your timeline.'}</p>${formFooter('Create my celebration')}</form>`);
  $('#modal form').actionHandler=async b=>{await api('events/create',b);$('#modal').close();page='Overview';await refresh();confetti();toast('Your celebration is ready. Let’s bring your people together!')};
 }
 joinEvent=function(code=''){
