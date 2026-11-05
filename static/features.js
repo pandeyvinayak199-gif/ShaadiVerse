@@ -12,7 +12,7 @@ refresh=async function({throwOnError=false}={}){
   state=await api('state');
   const role=state.user.role;
   if(!state.event.length){accountHome();return state}
-  const pages={Guest:['Passport','Timeline','Celebrations'],Vendor:['Vendors','Timeline'],'Hotel Partner':['Travel & stay','Timeline'],'Finance Team':['Expenses','Timeline']};
+  const pages={Guest:['Passport','Timeline','Celebrations','Memories'],Vendor:['Vendors','Timeline'],'Hotel Partner':['Travel & stay','Timeline'],'Finance Team':['Expenses','Timeline']};
   if(pages[role]&&!pages[role].includes(page))page=pages[role][0];
   if(role==='Super Organiser'&&['Passport'].includes(page))page='Overview';
   render();return state;

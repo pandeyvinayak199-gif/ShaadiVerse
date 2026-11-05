@@ -1,0 +1,32 @@
+const {chromium}=require('playwright');const fs=require('fs'),os=require('os'),path=require('path'),{execFileSync}=require('child_process');
+const fixtureDir=fs.mkdtempSync(path.join(os.tmpdir(),'shaadiverse-memory-fixtures-'));
+const fixture=name=>path.join(fixtureDir,name);
+execFileSync(process.env.PYTHON||'python',['-c',`from PIL import Image
+from pillow_heif import register_heif_opener
+from pathlib import Path
+import sys
+register_heif_opener()
+p=Path(sys.argv[1])
+Image.new('RGB',(800,600),'#aa6873').save(p/'alice.jpg')
+Image.new('RGB',(600,800),'#b7aa7a').save(p/'dance.png')
+Image.new('RGB',(500,400),'#768b79').save(p/'bob.heic','HEIF')
+(p/'bad.png').write_bytes(b'not a real photo')`,fixtureDir]);
+(async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']}),context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'}),owner=await context.newPage(),errors=[];owner.on('pageerror',e=>errors.push(e.message));
+ const base=process.env.APP_URL||'http://127.0.0.1:3008';await owner.goto(base);await owner.getByRole('button',{name:'Explore Rahul & Priya’s wedding'}).click();await owner.getByRole('heading',{name:'A beautiful celebration awaits.'}).waitFor();await owner.evaluate(()=>nav('Memories'));await owner.getByRole('button',{name:'Create our Memories album'}).click();await owner.getByRole('button',{name:'Download QR',exact:true}).waitFor();
+ const links=await owner.evaluate(()=>({share:memoryPanelData.shareUrl,host:memoryPanelData.hostUrl}));
+ const decoded=await owner.evaluate(async()=>{const img=document.querySelector('#memory-qr-image');await img.decode();const c=document.createElement('canvas');c.width=c.height=1000;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,1000,1000);ctx.drawImage(img,0,0,1000,1000);return jsQR(ctx.getImageData(0,0,1000,1000).data,1000,1000)?.data});if(decoded!==links.share)throw Error('Memories QR does not encode the guest album link');
+ const ac=await browser.newContext({acceptDownloads:true}),a=await ac.newPage();a.on('pageerror',e=>errors.push(e.message));await a.goto(links.share);await a.locator('input[name=name]').fill('Alice');await a.locator('input[name=consent]').check();await a.getByRole('button',{name:'Enter the Memories album →'}).click();await a.getByRole('heading',{name:'Every camera has a different story.'}).waitFor();await a.locator('#photo-files').setInputFiles([fixture('alice.jpg'),fixture('dance.png')]);await a.getByRole('button',{name:'Upload selected photos'}).click();await a.getByText('Saved 2 of 2 selected photos.',{exact:true}).waitFor();await a.waitForFunction(()=>document.querySelectorAll('.photo-card').length===2&&[...document.querySelectorAll('.photo-open img')].every(i=>i.complete&&i.naturalWidth>0));let reloadedImages=0;const imageListener=req=>{if(req.url().includes('/api/memories/image/'))reloadedImages++};a.on('request',imageListener);await a.evaluate(()=>refreshGallery());if(reloadedImages)throw Error('Unchanged gallery reloaded all images');a.off('request',imageListener);
+ const bc=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,acceptDownloads:true}),b=await bc.newPage();b.on('pageerror',e=>errors.push(e.message));await b.goto(links.share);await b.locator('input[name=name]').fill('Bob');await b.locator('input[name=consent]').check();await b.getByRole('button',{name:'Enter the Memories album →'}).click();await b.locator('.photo-card').first().waitFor();
+ const [jpg]=await Promise.all([b.waitForEvent('download'),b.getByRole('link',{name:'Save photo ↓'}).first().click()]);const jpgBytes=fs.readFileSync(await jpg.path());if(jpgBytes[0]!==255||jpgBytes[1]!==216)throw Error('Downloaded photo is not JPEG');
+ await b.locator('#photo-files').setInputFiles(fixture('bob.heic'));await b.getByRole('button',{name:'Upload selected photos'}).click();await b.getByText('Saved 1 of 1 selected photos.',{exact:true}).waitFor();await b.locator('.select-photo input').first().check();await b.locator('.select-photo input').nth(1).check();
+ const [zip]=await Promise.all([b.waitForEvent('download'),b.getByRole('button',{name:'Save selected as ZIP'}).click()]);const zipBytes=fs.readFileSync(await zip.path());if(zipBytes.subarray(0,2).toString()!=='PK')throw Error('Selection download is not ZIP');
+ if(await b.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('Mobile gallery overflows');await b.screenshot({path:'/tmp/shaadiverse-memories-mobile.png',fullPage:true});
+ await a.getByRole('button',{name:'↻ Refresh album'}).click();await a.waitForFunction(()=>document.querySelectorAll('.photo-card').length===3);
+ await a.locator('#photo-files').setInputFiles([fixture('alice.jpg'),fixture('bad.png')]);await a.getByRole('button',{name:'Upload selected photos'}).click();await a.getByText('Saved 1 of 2 selected photos.',{exact:true}).waitFor();await a.getByRole('button',{name:'Retry 1 unsaved photo',exact:true}).waitFor();
+ const hc=await browser.newContext(),host=await hc.newPage();host.on('pageerror',e=>errors.push(e.message));await host.goto(links.host);await host.getByText('Organiser controls',{exact:true}).click();await host.getByRole('button',{name:'Pause uploads',exact:true}).click();await host.locator('[data-action=uploads]').filter({hasText:'Resume uploads'}).waitFor({state:'attached'});
+ await b.getByRole('button',{name:'↻ Refresh album'}).click();await b.getByText('The organiser has paused uploads. You can still save photos from the gallery.',{exact:true}).waitFor();
+ await host.getByText('Organiser controls',{exact:true}).click();host.on('dialog',d=>d.accept());const before=await host.evaluate(()=>m.album.photoCount);await host.getByRole('button',{name:'Replace shared link',exact:true}).click();await host.waitForFunction(old=>m.hostInfo.shareUrl!==old,links.share);if(await host.evaluate(()=>m.album.photoCount)!==before)throw Error('Replacing shared link deleted photos');
+ await a.reload();await a.getByText('This album link is invalid or has been replaced.',{exact:true}).waitFor();
+ if(errors.length)throw Error(errors.join('\n'));console.log('PASS: guest QR decode, two name-only visitors, multi-photo and HEIC uploads, shared gallery, JPEG/ZIP downloads, partial-failure retry, mobile layout, private host recovery, pause and link replacement; no page errors.');await browser.close();fs.rmSync(fixtureDir,{recursive:true,force:true});
+})().catch(e=>{console.error(e);process.exit(1)});

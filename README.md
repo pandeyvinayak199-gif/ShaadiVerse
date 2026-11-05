@@ -102,7 +102,7 @@ Use a fresh disposable database for each browser run: the browser tests create s
 
 ## Remaining original-brief work
 
-These five recommended upgrades are implemented in code and need the hosting/provider activation described above. This is still not every feature in the much larger original brief: seating drag-and-drop, ID/photo/contract/receipt uploads, per-guest hotel-room assignments, automatic personal-data deletion, Hindi translations, memory books, invitation animation, planner subscriptions, platform admin and marketplace features remain separate work. Offline scanning intentionally does not claim multi-device admission authority while disconnected.
+These five recommended upgrades are implemented in code and need the hosting/provider activation described above. This is still not every feature in the much larger original brief: seating drag-and-drop, ID/contract/receipt uploads, per-guest hotel-room assignments, automatic personal-data deletion, Hindi translations, memory books, invitation animation, planner subscriptions, platform admin and marketplace features remain separate work. Offline scanning intentionally does not claim multi-device admission authority while disconnected.
 
 ## Local PostgreSQL validation
 
@@ -121,3 +121,7 @@ ShaadiVerse now includes a standalone PWA manifest, 192/512 px and maskable app 
 ## Spotify song links
 
 In Celebrations, organisers and guests can add a song name, optional artist and optional Spotify track/share link. Saved track links open Spotify in a separate tab/app; requests without a URL receive a Spotify search link, including older song records. Organisers can edit a song’s link later. Guest requests retain Pending status and guests see their own requests. HTTPS Spotify track links, official `spotify.link` shares and track URIs are accepted and normalised; no Spotify API credentials, automatic track matching or embedded playback are used.
+
+## Memories shared photo albums
+
+**Memories → Create our Memories album** gives each event a guest QR/link and a separate private host link. Guests enter a name, upload multiple photos, browse everyone’s photos and download individual images or a selected ZIP. Photos use the existing private database, including Supabase when configured; no new service credentials are needed. JPEG/PNG/WebP/HEIC uploads are validated, optimised for sharing and stripped of original location metadata. Finite storage/file-size limits are explicit. Hosts can pause uploads/access, rotate guest links and remove photos. See the [Memories guide](docs/MEMORIES.md), especially saving the private host link before resetting a demo.

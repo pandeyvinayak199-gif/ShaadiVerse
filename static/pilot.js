@@ -26,7 +26,7 @@ function demoRoles(){
 }
 async function switchDemoRole(role){$('#modal').close();await demo(role)}
 function resetDemoPrompt(){
- modal('A fresh start to the festivities?',`<p class="subtitle">Start a new sample wedding for your next presentation. Your previous pilot survey response is retained. Other visitors’ workspaces and real events are unaffected.</p><div class="form-actions"><button class="secondary" onclick="document.querySelector('dialog').close()">Keep exploring</button><button class="primary" id="fresh-demo">Start fresh demo</button></div>`);
+ modal('A fresh start to the festivities?',`<p class="subtitle">Start a new sample wedding for your next presentation. Your previous pilot survey response is retained. Shared photos remain at their original album links; save your private Memories host link before starting fresh. Other visitors’ workspaces and real events are unaffected.</p><div class="form-actions"><button class="secondary" onclick="document.querySelector('dialog').close()">Keep exploring</button><button class="primary" id="fresh-demo">Start fresh demo</button></div>`);
  $('#fresh-demo').onclick=async()=>{await api('demo/reset',{});$('#modal').close();page='Overview';saveQueue([]);await refresh();toast('Fresh sample wedding ready. Let the celebrations begin!')};
 }
 async function connections(){

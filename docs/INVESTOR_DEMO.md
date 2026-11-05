@@ -14,9 +14,10 @@ This release is the fixed demo scope for the current stage. It demonstrates the 
 
 1. **The problem:** weddings involve many people, messages and moving parts. Show the home screen and the countdown.
 2. **The guest story:** open Guests; search, add a fictional guest, edit RSVP/dietary data and show a confirmed guest’s signed QR pass.
-3. **The coordination story:** show Timeline, Tasks, Travel & stay and Catering.
-4. **The trust story:** show Expenses, approval status, member permissions and revocation. Switch to Guest to demonstrate the private passport without finance or other guests’ records.
-5. **The pilot:** open the survey, explain the explicit consent, and collect ease-of-use, usefulness, willingness-to-use, respondent perspective and optional comments. Responses are stored, not fabricated.
+3. **The photo story:** open Memories, create an album, show the guest QR and explain name-only sharing, uploads and downloads. Save the separate private host link.
+4. **The coordination story:** show Timeline, Tasks, Travel & stay and Catering.
+5. **The trust story:** show Expenses, approval status, member permissions and revocation. Switch to Guest to demonstrate the private passport without finance or other guests’ records.
+6. **The pilot:** open the survey, explain the explicit consent, and collect ease-of-use, usefulness, willingness-to-use, respondent perspective and optional comments. Responses are stored, not fabricated.
 
 “Present” expands the organiser dashboard for a screen share; “Exit presentation” restores the navigation. The six-step walkthrough is also available inside the demo strip.
 
@@ -30,4 +31,4 @@ After trying the product, participants choose **Share pilot feedback**. Consent 
 
 Use **Connections · Set up later** for Supabase, Twilio, WhatsApp Business and Razorpay checklists. This screen shows setting names and provider dashboard links, never stored credential values. Configure providers securely in hosting settings later. No live messages, identity-verification claims or charges occur in demo mode.
 
-Supported now: guest CRUD/CSV/RSVP, timeline, vendors, expenses, tasks, travel milestones and room-block summaries, catering, gifts, songs, polls, event creation/switching, member restrictions, signed QR entry and explicit pending offline scans. Room assignments, ID uploads, memory books, seating planner, multilingual UI, production retention jobs, recurring subscriptions and marketplace features from the original larger brief are outside this demo release. Don’t describe them as shipped.
+Supported now: QR-linked shared photo albums, guest CRUD/CSV/RSVP, timeline, vendors, expenses, tasks, travel milestones and room-block summaries, catering, gifts, songs, polls, event creation/switching, member restrictions, signed QR entry and explicit pending offline scans. Room assignments, ID uploads, memory books, seating planner, multilingual UI, production retention jobs, recurring subscriptions and marketplace features from the original larger brief are outside this demo release. Don’t describe them as shipped.

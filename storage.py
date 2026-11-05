@@ -3,7 +3,7 @@ import os, sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-APP_TABLES=['records','audit','users','memberships','sessions','challenges','settings','limits','purchases','outbox','event_codes','webhook_events','feedback']
+APP_TABLES=['records','audit','users','memberships','sessions','challenges','settings','limits','purchases','outbox','event_codes','webhook_events','feedback','memory_albums','memory_visitors','memory_photos']
 
 class PGConnection:
     def __init__(self, url):
@@ -50,6 +50,7 @@ def connect(path, write=False):
 def migrate(path):
     pg = bool(os.environ.get('DATABASE_URL'))
     pk = 'BIGSERIAL PRIMARY KEY' if pg else 'INTEGER PRIMARY KEY'
+    binary = 'BYTEA' if pg else 'BLOB'
     with connect(path, True) as c:
         if pg:
             c.execute('SELECT pg_advisory_xact_lock(823917822)')
@@ -76,6 +77,9 @@ def migrate(path):
         CREATE TABLE IF NOT EXISTS outbox(id {pk},event_id INTEGER,guest_id INTEGER,phone TEXT,status TEXT,provider_id TEXT,error TEXT,created DOUBLE PRECISION);
         CREATE TABLE IF NOT EXISTS event_codes(code TEXT PRIMARY KEY,event_id INTEGER UNIQUE NOT NULL);
         CREATE TABLE IF NOT EXISTS webhook_events(id TEXT PRIMARY KEY,created DOUBLE PRECISION);
+        CREATE TABLE IF NOT EXISTS memory_albums(id TEXT PRIMARY KEY,event_id INTEGER UNIQUE NOT NULL,share_token TEXT UNIQUE NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,uploads_open INTEGER NOT NULL DEFAULT 1,host_token TEXT NOT NULL,created DOUBLE PRECISION);
+        CREATE TABLE IF NOT EXISTS memory_visitors(id TEXT PRIMARY KEY,album_id TEXT NOT NULL,token_hash TEXT UNIQUE NOT NULL,name TEXT NOT NULL,csrf TEXT NOT NULL,is_host INTEGER NOT NULL DEFAULT 0,expires DOUBLE PRECISION NOT NULL);
+        CREATE TABLE IF NOT EXISTS memory_photos(id TEXT PRIMARY KEY,album_id TEXT NOT NULL,visitor_id TEXT NOT NULL,uploader TEXT NOT NULL,image {binary} NOT NULL,thumbnail {binary} NOT NULL,bytes INTEGER NOT NULL,width INTEGER,height INTEGER,created DOUBLE PRECISION NOT NULL,request_id TEXT NOT NULL,UNIQUE(album_id,visitor_id,request_id));
         CREATE TABLE IF NOT EXISTS feedback(id {pk},actor_hash TEXT UNIQUE NOT NULL,source TEXT NOT NULL,event_id INTEGER,rating INTEGER,usefulness INTEGER,willingness TEXT,persona TEXT,comments TEXT,created DOUBLE PRECISION,updated DOUBLE PRECISION);
         ''')
         if pg:
@@ -91,6 +95,8 @@ def migrate(path):
             c.execute("ALTER TABLE sessions ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'legacy'")
         c.execute('CREATE INDEX IF NOT EXISTS records_scope ON records(event_id,kind)')
         c.execute('CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires)')
+        c.execute('CREATE INDEX IF NOT EXISTS memory_photos_album ON memory_photos(album_id,created,id)')
+        c.execute('CREATE INDEX IF NOT EXISTS memory_visitors_expiry ON memory_visitors(expires)')
         if pg:
             for table in APP_TABLES:
                 c.execute('ALTER TABLE shaadi_sync.'+table+' ENABLE ROW LEVEL SECURITY')

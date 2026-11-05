@@ -1,15 +1,16 @@
 """ShaadiVerse: event-scoped application API with durable authentication."""
-import base64, hashlib, hmac, io, ipaddress, json, math, os, re, secrets, time
+import base64, hashlib, hmac, io, ipaddress, json, math, os, re, secrets, time, threading
 from datetime import date
 from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, unquote, parse_qs
-import storage, providers
+import storage, providers, memories
 from seed import demo_records
 
 DB=os.environ.get('DATABASE_PATH','shaadi.sqlite3')
 SESSION_TTL=86400
+MEMORY_UPLOAD_SLOTS=threading.BoundedSemaphore(2)
 ROLES=['Super Organiser','Co-Organiser','Finance Team','Vendor','Guest','Hotel Partner']
 ALLOWED=['guests','timeline','vendors','tasks','hotels','transport','catering','announcements','songs','photos','gifts','polls']
 CATALOG={'Event Pass':299900}  # INR paise, controlled by the server
@@ -144,6 +145,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers();self.wfile.write(b)
     def require_access(self):
         password=os.environ.get('DEMO_ACCESS_PASSWORD','')
+        if urlparse(self.path).path.startswith('/api/memories/') or urlparse(self.path).path in ['/memories','/memory-client.js','/memory-style.css']:return True
         if urlparse(self.path).path in ['/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png','/icons/maskable-512.png','/icons/apple-touch-icon.png']:return True
         if not password or urlparse(self.path).path in ['/api/health','/api/webhooks/razorpay','/api/webhooks/whatsapp']:return True
         try:
@@ -156,11 +158,15 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):self.handle_api(True)
     def handle_api(self,post):
         if not self.require_access():return
+        memory_upload_slot=False
         try:
             parsed=urlparse(self.path);path=parsed.path;query=parse_qs(parsed.query);self.s=session_for(self)
             if post:
+                if path=='/api/memories/upload':
+                    if not MEMORY_UPLOAD_SLOTS.acquire(blocking=False):raise HTTPError(503,'Photos are being processed. Please retry this upload shortly.')
+                    memory_upload_slot=True
                 length=int(self.headers.get('Content-Length','0'))
-                if length<0 or length>1000000:raise HTTPError(413,'Request too large')
+                if length<0 or length>(22*1024*1024 if path=='/api/memories/upload' else 1000000):raise HTTPError(413,'Request too large')
                 raw=self.rfile.read(length)
                 if path.startswith('/api/webhooks/'):
                     return self.response(200,self.webhook(path,raw))
@@ -170,9 +176,11 @@ class Handler(SimpleHTTPRequestHandler):
                 if origin and origin not in {allowed,'https://'+self.headers.get('Host',''),'http://'+self.headers.get('Host','')}:raise HTTPError(403,'Request origin is not allowed')
                 body=json.loads(raw or b'{}')
                 if not isinstance(body,dict):raise ValueError('JSON object required')
+                if path.startswith('/api/memories/'):return self.memory_post(path,body)
                 if self.s and path not in ['/api/auth/otp','/api/auth/verify','/api/auth/demo']:
                     if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),self.s['csrf']):raise HTTPError(403,'Refresh the page before making this request.')
                 return self.post(path,body)
+            if path.startswith('/api/memories/'):return self.memory_get(path,query)
             if path=='/api/health':return self.response(200,{'ok':True})
             if path=='/api/bootstrap':return self.response(200,{'demoMode':demo_mode(),'smsReady':providers.sms_ready(),'whatsappReady':providers.whatsapp_ready(),'paymentsReady':providers.payments_ready(),'databaseConfigured':bool(os.environ.get('DATABASE_URL')),'release':'investor-pilot','version':'1.0','sandboxOtpAvailable':sandbox_otp()})
             if path=='/api/webhooks/whatsapp':
@@ -197,15 +205,51 @@ class Handler(SimpleHTTPRequestHandler):
             if path=='/api/pass':return self.response(200,self.entry_pass(query))
             if path=='/api/invoice':return self.response(200,self.invoice(query))
             if path.startswith('/api/'):raise HTTPError(404,'Not found')
-            target=(Path(__file__).parent/'static'/('index.html' if path=='/' else unquote(path).lstrip('/'))).resolve()
+            target=(Path(__file__).parent/'static'/('index.html' if path=='/' else 'memories.html' if path=='/memories' else unquote(path).lstrip('/'))).resolve()
             if not target.is_relative_to((Path(__file__).parent/'static').resolve()) or not target.is_file():raise HTTPError(404,'Not found')
-            content=target.read_bytes();self.send_response(200);self.send_header('Content-Type','application/manifest+json' if target.suffix=='.webmanifest' else self.guess_type(str(target)));self.send_header('X-Content-Type-Options','nosniff');self.send_header('Referrer-Policy','same-origin');self.end_headers();self.wfile.write(content)
+            content=target.read_bytes();self.send_response(200);self.send_header('Content-Type','application/manifest+json' if target.suffix=='.webmanifest' else self.guess_type(str(target)));self.send_header('X-Content-Type-Options','nosniff');self.send_header('Referrer-Policy','no-referrer' if path=='/memories' else 'same-origin');self.end_headers();self.wfile.write(content)
+        except memories.AlbumError as e:self.response(e.status,{'error':str(e)})
         except HTTPError as e:self.response(e.status,{'error':str(e)})
         except providers.ProviderError as e:self.response(503,{'error':str(e)})
         except (ValueError,TypeError,KeyError,OverflowError):self.response(400,{'error':'Invalid request. Please check the submitted fields.'})
         except Exception:
             # No provider bodies, keys, cookies, OTPs, IDs or PII in logs.
             self.response(500,{'error':'The request could not be completed. Please retry.'})
+        finally:
+            if memory_upload_slot:MEMORY_UPLOAD_SLOTS.release()
+    def memory_service(self):
+        base=os.environ.get('PUBLIC_BASE_URL','').rstrip('/')
+        if not base:
+            secure=os.environ.get('COOKIE_SECURE','0')=='1' or (os.environ.get('TRUST_PROXY','0')=='1' and self.headers.get('X-Forwarded-Proto')=='https')
+            base=('https://' if secure else 'http://')+self.headers.get('Host','localhost')
+        return memories.Albums(conn,self.s,self.headers,self.client_identity(),base)
+    def memory_post(self,path,body):
+        service=self.memory_service()
+        if path=='/api/memories/access':return self.response(200,service.access(body))
+        if path in ['/api/memories/join','/api/memories/host']:
+            data,cookie=service.join(body) if path.endswith('/join') else service.host(body)
+            return self.response(200,data,cookie)
+        if path=='/api/memories/manage':return self.response(200,service.manage(body))
+        if path=='/api/memories/upload':return self.response(201,service.upload(body))
+        if path=='/api/memories/remove':return self.response(200,service.remove(body))
+        raise HTTPError(404,'Photo album action not found.')
+    def memory_get(self,path,query):
+        service=self.memory_service();album=query.get('album',[''])[0]
+        if path=='/api/memories/member':return self.response(200,service.member())
+        if path=='/api/memories/album':return self.response(200,service.listing(album,query.get('before',[None])[0]))
+        if path.startswith('/api/memories/image/'):
+            pid=path.rsplit('/',1)[-1];data=service.image(album,pid,query.get('thumb')==['1'])
+            self.send_response(200);self.send_header('Content-Type','image/jpeg');self.send_header('Cache-Control','private, no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Referrer-Policy','no-referrer');self.send_header('Content-Length',str(len(data)))
+            if query.get('download')==['1']:self.send_header('Content-Disposition','attachment; filename="ShaadiVerse-'+pid+'.jpg"')
+            self.end_headers();self.wfile.write(data);return
+        if path=='/api/memories/download':
+            stream=service.download(album,query.get('ids',[''])[0].split(','))
+            try:
+                self.send_response(200);self.send_header('Content-Type','application/zip');self.send_header('Content-Disposition','attachment; filename="ShaadiVerse-memories.zip"');self.send_header('Cache-Control','private, no-store');self.send_header('X-Content-Type-Options','nosniff');self.end_headers()
+                while chunk:=stream.read(65536):self.wfile.write(chunk)
+            finally:stream.close()
+            return
+        raise HTTPError(404,'Photo album route not found.')
     def require_role(self,*roles):
         if not self.s:raise HTTPError(401,'Please sign in')
         if not self.s['event_id'] or self.s['role'] not in roles:raise HTTPError(403,'You do not have access to this event or action.')

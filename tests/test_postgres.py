@@ -22,6 +22,28 @@ class PostgreSQLRelease(WorkflowCase):
   self.env.stop()
   with psycopg.connect(self.admin_url,autocommit=True) as c:c.execute(sql.SQL('DROP DATABASE {}').format(sql.Identifier(self.database)))
  def demo(self):return self.req('auth/demo',{'role':'Super Organiser'})[2]
+ def test_postgres_memories_photo_bytes_persist(self):
+  import base64,urllib.request
+  from test_memories import photo_bytes
+  self.start();owner=self.demo();status,album,_=self.req('memories/manage',{'action':'create'},owner);self.assertEqual(status,200,album)
+  token=album['shareUrl'].split('#')[1];status,visitor,cookie=self.req('memories/join',{'token':token,'name':'Postgres visitor','consent':True});self.assertEqual(status,200,visitor)
+  payload={'albumId':album['album']['id'],'requestId':'postgres-photo','data':base64.b64encode(photo_bytes()).decode()}
+  status,photo,_=self.req('memories/upload',payload,cookie,{'X-Memories-CSRF':visitor['csrf']});self.assertEqual(status,201,photo);server.initialize()
+  listing=self.req('memories/album?album='+album['album']['id'],cookie=cookie)[1];self.assertEqual(listing['album']['photoCount'],1)
+  req=urllib.request.Request(self.url+listing['photos'][0]['download'],headers={'Cookie':cookie})
+  with urllib.request.urlopen(req) as result:self.assertTrue(result.read().startswith(b'\xff\xd8'))
+ def test_postgres_memories_concurrent_quota(self):
+  import base64
+  from test_memories import photo_bytes
+  import memories
+  self.start();owner=self.demo();album=self.req('memories/manage',{'action':'create'},owner)[1];token=album['shareUrl'].split('#')[1]
+  a=self.req('memories/join',{'token':token,'name':'A','consent':True});b=self.req('memories/join',{'token':token,'name':'B','consent':True})
+  encoded=base64.b64encode(photo_bytes()).decode();image,thumbnail,_,_=memories.prepare_image(encoded);allowance=len(image)+len(thumbnail)+1
+  def upload(item):
+   _,visitor,cookie=item
+   return self.req('memories/upload',{'albumId':album['album']['id'],'requestId':'quota-photo-test','data':encoded},cookie,{'X-Memories-CSRF':visitor['csrf']})[0]
+  with patch('memories.quota',return_value=allowance),concurrent.futures.ThreadPoolExecutor(2) as pool:results=list(pool.map(upload,[a,b]))
+  self.assertEqual(sorted(results),[201,413])
  def test_private_schema_and_rls(self):
   import psycopg
   with psycopg.connect(self.url_db,autocommit=True) as c:
