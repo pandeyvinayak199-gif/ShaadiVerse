@@ -16,7 +16,7 @@ refresh=async function({throwOnError=false}={}){
   if(pages[role]&&!pages[role].includes(page))page=pages[role][0];
   if(role==='Super Organiser'&&['Passport'].includes(page))page='Overview';
   render();return state;
- }catch(e){if(throwOnError)throw e;if(e.status===401)login();else if(!navigator.onLine)offlineGate();else toast(e.message)}
+ }catch(e){if(throwOnError)throw e;if(e.status===401)login();else if(e instanceof TypeError||!navigator.onLine)offlineGate();else toast(e.message)}
 };
 login=function(){
  const demos=bootstrap.demoMode?`<div class="welcome-note">Explore with sample data. Demo sign-in never sends SMS or payments.</div><button class="primary" onclick="demo('Super Organiser')">Explore Rahul & Priya’s wedding →</button><div class="divider">TRY ANOTHER DEMO ROLE</div><div class="role-grid">${['Co-Organiser','Finance Team','Vendor','Guest','Hotel Partner'].map(r=>`<button onclick="demo('${r}')">${r}</button>`).join('')}</div><div class="divider">OR CREATE YOUR OWN CELEBRATION</div>`:'';
@@ -135,7 +135,7 @@ async function syncGateQueue(){
  toast(results.length+' pending scans processed. Review each result.');
 }
 function offlineGate(){
- const gate=queueScope();if(!gate)return toast('You’re offline. Reconnect to sign in.');
+ const gate=queueScope();if(!gate){$('#app').innerHTML=`<div class="account-shell"><div class="brand"><em>❋</em> ShaadiVerse</div><h1 style="margin-top:45px">A little pause in the celebrations.</h1><p class="welcome-note">We can’t reach the server right now. Reconnect to sign in, load your celebration, or submit feedback.</p>${button('Try again','location.reload()')}</div>`;return}
  $('#app').innerHTML=`<div class="account-shell"><div class="brand"><em>❋</em> ShaadiVerse</div><h1 style="margin-top:45px">The gate, on the go.</h1><h2>${esc(gate.name)}</h2><p class="welcome-note">Offline mode. Scans are queued for verification; entry is not approved until you reconnect.</p>${button('Queue a QR scan','scanner()')}${button('Reconnect & sign in','location.reload()',true)}</div>`;
 }
 broadcast=function(){
@@ -159,5 +159,5 @@ async function checkout(plan){
 async function paymentReceipt(){const r=await api('invoice');modal('Your payment receipt.',`<p>Receipt: ${esc(r.receipt.id)}</p><p>Payment: ${esc(r.receipt.payment_id)}</p><p>${esc(r.receipt.plan)} · ${money(r.receipt.amount/100)}</p><p>${new Date(r.receipt.created*1000).toLocaleString()}</p><p class="subtitle">${esc(r.note)}</p>${button('Print receipt','window.print()',true)}`)}
 logout=async function(){await api('auth/logout',{});csrfToken='';state={};stopCamera();localStorage.removeItem('shaadi-gate');saveQueue([]);login()};
 async function boot(){
- try{bootstrap=await api('bootstrap');await refresh();if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});}catch(e){if(!navigator.onLine)offlineGate();else toast('Unable to connect. Please refresh the page.')}
+ try{bootstrap=await api('bootstrap');await refresh();if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});}catch(e){if(e instanceof TypeError||!navigator.onLine)offlineGate();else{offlineGate();toast('Unable to connect. Please reconnect and retry.')}}
 }

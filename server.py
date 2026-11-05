@@ -126,6 +126,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers();self.wfile.write(b)
     def require_access(self):
         password=os.environ.get('DEMO_ACCESS_PASSWORD','')
+        if urlparse(self.path).path in ['/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png','/icons/maskable-512.png','/icons/apple-touch-icon.png']:return True
         if not password or urlparse(self.path).path in ['/api/health','/api/webhooks/razorpay','/api/webhooks/whatsapp']:return True
         try:
             scheme,encoded=self.headers.get('Authorization','').split(' ',1)
@@ -180,7 +181,7 @@ class Handler(SimpleHTTPRequestHandler):
             if path.startswith('/api/'):raise HTTPError(404,'Not found')
             target=(Path(__file__).parent/'static'/('index.html' if path=='/' else unquote(path).lstrip('/'))).resolve()
             if not target.is_relative_to((Path(__file__).parent/'static').resolve()) or not target.is_file():raise HTTPError(404,'Not found')
-            content=target.read_bytes();self.send_response(200);self.send_header('Content-Type',self.guess_type(str(target)));self.send_header('X-Content-Type-Options','nosniff');self.send_header('Referrer-Policy','same-origin');self.end_headers();self.wfile.write(content)
+            content=target.read_bytes();self.send_response(200);self.send_header('Content-Type','application/manifest+json' if target.suffix=='.webmanifest' else self.guess_type(str(target)));self.send_header('X-Content-Type-Options','nosniff');self.send_header('Referrer-Policy','same-origin');self.end_headers();self.wfile.write(content)
         except HTTPError as e:self.response(e.status,{'error':str(e)})
         except providers.ProviderError as e:self.response(503,{'error':str(e)})
         except (ValueError,TypeError,KeyError,OverflowError):self.response(400,{'error':'Invalid request. Please check the submitted fields.'})

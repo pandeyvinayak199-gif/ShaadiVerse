@@ -111,3 +111,9 @@ The optional `tests/test_postgres.py` creates and drops only randomly named test
 ## Walkthrough startup checks
 
 The walkthrough waits for the sample dashboard before opening, disables duplicate starts while loading, and leaves a visible retry message if loading fails. All presentation handlers are installed before bootstrap. Dashboard records share one database connection per response, and PostgreSQL sample inserts are batched. To exercise delayed loading and failure recovery, run `APP_URL=http://127.0.0.1:3004 node tests/browser-walkthrough.cjs` against a disposable demo instance.
+
+## Install on Android or iPhone
+
+ShaadiVerse now includes a standalone PWA manifest, 192/512 px and maskable app icons, an Apple home-screen icon, safe-area spacing and an in-app installation entry. Android uses the native browser prompt when available; iPhone users receive Safari Add to Home Screen instructions. See [phone installation](docs/INSTALL_ON_PHONE.md). The browser fallback remains available on desktop.
+
+`node tests/browser-pwa.cjs` checks manifest installability with a disposable normal Chrome profile (Incognito cannot install apps), installation UI, iPhone guidance, offline launch and exclusion of private API responses from the cache. Supply `APP_URL` and optionally `CHROMIUM_PATH`. The native OS installation itself needs a real-device check.
