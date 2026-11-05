@@ -416,6 +416,20 @@ class Handler(SimpleHTTPRequestHandler):
                 if s['phone'] in poll.get('voters',[]):raise HTTPError(409,'You have already voted in this poll.')
                 poll['options'][b['option']]+=1;poll.setdefault('voters',[]).append(s['phone']);update(c,'polls',poll,eid)
             return self.response(200,{'ok':True})
+        if path=='/api/budget/adjust':
+            self.require_role('Super Organiser')
+            operation=b.get('operation')
+            if operation not in ('add','remove','clear'):raise HTTPError(400,'Choose add, remove or clear.')
+            delta=round(amount(b.get('amount',0)),2)
+            if operation!='clear' and delta<=0:raise HTTPError(400,'Enter an amount greater than zero.')
+            with conn(True) as c:
+                if os.environ.get('DATABASE_URL'):c.execute("SELECT id FROM records WHERE kind='event' AND event_id=? FOR UPDATE",(eid,))
+                event=rows('event',eid,c)[0];before=event.get('budget',0)
+                after=0 if operation=='clear' else round(before+(delta if operation=='add' else -delta),2)
+                if after<0:raise HTTPError(400,'You cannot remove more than the current budget.')
+                event['budget']=amount(after);update(c,'event',event,eid)
+                audit(c,s,f'Budget {operation}: INR {before:.2f} → INR {after:.2f}')
+            return self.response(200,{'ok':True,'budget':after})
         if path=='/api/save':return self.save_record(b)
         raise HTTPError(404,'Not found')
     def create_event(self,b):
