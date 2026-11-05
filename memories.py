@@ -67,11 +67,14 @@ class Albums:
         except (KeyError,AttributeError):return None
         row=c.execute('SELECT * FROM memory_visitors WHERE album_id=? AND token_hash=? AND expires>?',(album['id'],digest(token),time.time())).fetchone()
         return dict(row) if row else None
+    def _member(self,album):
+        s=self.session
+        return bool(s and s['event_id']==album['event_id'] and s['role'] in ['Super Organiser','Co-Organiser','Guest'])
     def _actor(self,c,album,write=False):
         visitor=self._visitor(c,album);manager=self._manager(album) or bool(visitor and visitor['is_host'])
         if not album['enabled'] and not manager:raise AlbumError(410,'Sharing for this album is paused by the organiser.')
         if visitor:actor={**visitor,'manager':manager,'memory_cookie':True}
-        elif manager:actor={'id':'account:'+self.session['phone'],'name':self.session['name'],'csrf':self.session['csrf'],'manager':True,'memory_cookie':False}
+        elif self._member(album):actor={'id':'account:'+self.session['phone'],'name':self.session['name'],'csrf':self.session['csrf'],'manager':manager,'memory_cookie':False}
         else:raise AlbumError(401,'Open the shared QR link and enter your name to access this album.')
         if write:
             provided=self.headers.get('X-Memories-CSRF' if actor['memory_cookie'] else 'X-CSRF-Token','')

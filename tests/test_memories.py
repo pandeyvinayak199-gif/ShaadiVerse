@@ -105,3 +105,17 @@ class SharedMemories(WorkflowCase):
   self.assertEqual(self.req('memories/album?album='+aid,cookie=cookie)[0],401)
  def test_iphone_heic_is_decoded(self):
   album=self.album(self.owner());a,csrf=self.visitor(album);status,data,_=self.upload(album,a,csrf,raw=photo_bytes('HEIF'));self.assertEqual(status,201,data)
+ def test_signed_in_guest_uploads_without_qr_join(self):
+  owner=self.account();eid=self.event(owner);album=self.album(owner)
+  self.guest(owner)
+  guest=self.account('9777777700','Wedding guest')
+  self.assertEqual(self.req('events/select',{'eventId':eid},guest)[0],200)
+  status,data,_=self.upload(album,guest,'','guest-account-1');self.assertEqual(status,201,data)
+  listing=self.req('memories/album?album='+album['album']['id'],cookie=guest)[1]
+  self.assertEqual(listing['photos'][0]['uploader'],'Wedding guest');self.assertFalse(listing['manager']);self.assertTrue(listing['photos'][0]['canDelete'])
+  self.assertEqual(self.req('memories/manage',{'albumId':album['album']['id'],'action':'uploads','enabled':False},guest)[0],403)
+  self.assertEqual(self.req('memories/upload',{'albumId':album['album']['id'],'requestId':'bad-csrf-123','data':base64.b64encode(photo_bytes()).decode()},guest,{'X-CSRF-Token':'wrong'})[0],403)
+  other=self.account('9888888801');self.event(other)
+  self.assertEqual(self.upload(album,other,'','other-event-123')[0],401)
+  self.req('memories/manage',{'albumId':album['album']['id'],'action':'uploads','enabled':False},owner)
+  self.assertEqual(self.upload(album,guest,'','paused-guest-123')[0],403)
