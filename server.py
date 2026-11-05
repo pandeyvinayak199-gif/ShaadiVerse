@@ -54,6 +54,24 @@ def phone_number(raw):
 def text(value,limit=150):
     if not isinstance(value,str) or not value.strip() or len(value)>limit:raise ValueError('Enter a valid value (maximum '+str(limit)+' characters).')
     return value.strip()
+def spotify_link(value):
+    if value in (None,''):return ''
+    if not isinstance(value,str) or len(value)>500:raise ValueError('Invalid Spotify link')
+    value=value.strip()
+    if not value:return ''
+    uri=re.fullmatch(r'spotify:track:([A-Za-z0-9]{22})',value)
+    if uri:return 'https://open.spotify.com/track/'+uri[1]
+    parsed=urlparse(value)
+    if parsed.scheme!='https' or parsed.username or parsed.password or parsed.port:raise HTTPError(400,'Use a Spotify song link from Share → Copy song link.')
+    if parsed.hostname=='open.spotify.com':
+        track=re.fullmatch(r'/(?:intl-[a-z]{2}/)?track/([A-Za-z0-9]{22})/?',parsed.path)
+        if track:return 'https://open.spotify.com/track/'+track[1]
+    if parsed.hostname=='spotify.link' and re.fullmatch(r'/[A-Za-z0-9]{4,80}/?',parsed.path):return 'https://spotify.link'+parsed.path.rstrip('/')
+    raise HTTPError(400,'Use a Spotify song link from Share → Copy song link.')
+def song_fields(data):
+    artist=data.get('artist','')
+    if not isinstance(artist,str) or len(artist)>100:raise ValueError('Artist must be at most 100 characters')
+    return {'name':text(data.get('name')),'artist':artist.strip(),'spotifyUrl':spotify_link(data.get('spotifyUrl',''))}
 def amount(value):
     if isinstance(value,bool):raise ValueError('Invalid amount')
     n=float(value)
@@ -215,13 +233,14 @@ class Handler(SimpleHTTPRequestHandler):
         if role=='Super Organiser':kinds+=ALLOWED+['joins','entries','members','expenses']
         elif role=='Co-Organiser':kinds+=[k for k in ALLOWED+['joins','entries'] if s['demo_role'] or k in s['permissions']]
         elif role=='Finance Team':kinds+=['expenses']
-        elif role=='Guest':kinds+=['transport']
+        elif role=='Guest':kinds+=['transport','songs']
         data.update({k:rows(k,eid,c) for k in set(kinds)})
         if not data['event']:raise HTTPError(404,'Event no longer exists')
         for p in data['polls']:p['hasVoted']=s['phone'] in p.get('voters',[]);p.pop('voters',None)
         if role=='Guest':
             gs=[g for g in rows('guests',eid,c) if owns_guest(g,s)]
             data['guests']=gs
+            data['songs']=[song for song in data.get('songs',[]) if song.get('requestedBy')==s['phone']]
             invited=set(gs[0].get('events',[])) if gs else set()
             data['timeline']=[t for t in data['timeline'] if t['name'] in invited]
         if role=='Vendor':
@@ -342,7 +361,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.response(200,{'ok':True})
         if path=='/api/song':
             self.require_role('Guest')
-            with conn(True) as c:insert(c,'songs',{'name':text(b.get('name')),'owner':s['name'],'status':'Pending'},eid)
+            with conn(True) as c:insert(c,'songs',{**song_fields(b),'owner':s['name'],'requestedBy':s['phone'],'status':'Pending'},eid)
             return self.response(201,{'ok':True})
         if path=='/api/vote':
             self.require_role(*ROLES)
@@ -452,6 +471,10 @@ class Handler(SimpleHTTPRequestHandler):
                 for k in ['amount','paid']:data[k]=amount(data.get(k,0))
                 if data['paid']>data['amount']:raise ValueError('Payment exceeds expense')
                 data['status']='Needs Approval' if data['amount']>rows('event',eid,c)[0]['approvalThreshold'] and s['role']!='Super Organiser' else 'Approved'
+            elif kind=='songs':
+                data.update(song_fields(data));data['owner']=text(data.get('owner') or s['name'],80)
+                data['requestedBy']=(old or {}).get('requestedBy',s['phone'])
+                data.setdefault('status','Pending')
             elif kind=='timeline':date.fromisoformat(data['date']);text(data['name']);text(data['venue'])
             if old:update(c,kind,data,eid)
             else:data['id']=insert(c,kind,data,eid)

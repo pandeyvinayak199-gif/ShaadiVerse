@@ -117,3 +117,7 @@ The walkthrough waits for the sample dashboard before opening, disables duplicat
 ShaadiVerse now includes a standalone PWA manifest, 192/512 px and maskable app icons, an Apple home-screen icon, safe-area spacing and an in-app installation entry. Android uses the native browser prompt when available; iPhone users receive Safari Add to Home Screen instructions. See [phone installation](docs/INSTALL_ON_PHONE.md). The browser fallback remains available on desktop.
 
 `node tests/browser-pwa.cjs` checks manifest installability with a disposable normal Chrome profile (Incognito cannot install apps), installation UI, iPhone guidance, offline launch and exclusion of private API responses from the cache. Supply `APP_URL` and optionally `CHROMIUM_PATH`. The native OS installation itself needs a real-device check.
+
+## Spotify song links
+
+In Celebrations, organisers and guests can add a song name, optional artist and optional Spotify track/share link. Saved track links open Spotify in a separate tab/app; requests without a URL receive a Spotify search link, including older song records. Organisers can edit a song’s link later. Guest requests retain Pending status and guests see their own requests. HTTPS Spotify track links, official `spotify.link` shares and track URIs are accepted and normalised; no Spotify API credentials, automatic track matching or embedded playback are used.
