@@ -1,4 +1,4 @@
-"""Shaadi Sync: event-scoped application API with durable authentication."""
+"""ShaadiVerse: event-scoped application API with durable authentication."""
 import base64, hashlib, hmac, io, ipaddress, json, math, os, re, secrets, time
 from datetime import date
 from http.cookies import SimpleCookie
@@ -132,7 +132,7 @@ class Handler(SimpleHTTPRequestHandler):
             user,pw=base64.b64decode(encoded,validate=True).decode().split(':',1)
             if scheme.lower()=='basic' and user=='demo' and hmac.compare_digest(pw.encode(),password.encode()):return True
         except (ValueError,UnicodeError):pass
-        self.send_response(401);self.send_header('WWW-Authenticate','Basic realm="Shaadi Sync private demo", charset="UTF-8"');self.end_headers();return False
+        self.send_response(401);self.send_header('WWW-Authenticate','Basic realm="ShaadiVerse private demo", charset="UTF-8"');self.end_headers();return False
     def do_GET(self):self.handle_api(False)
     def do_POST(self):self.handle_api(True)
     def handle_api(self,post):
@@ -535,7 +535,7 @@ class Handler(SimpleHTTPRequestHandler):
         result=providers.payment_request('orders',{'amount':CATALOG[plan],'currency':'INR','receipt':'ss_'+secrets.token_hex(12),'notes':{'event_id':str(eid),'plan':plan},'payment_capture':1})
         if result.get('amount')!=CATALOG[plan] or result.get('currency')!='INR' or not re.fullmatch(r'order_[A-Za-z0-9]+',result.get('id','')):raise providers.ProviderError('Unexpected payment order response.')
         with conn(True) as c:c.execute('INSERT INTO purchases VALUES(?,?,?,?,?,?,?,?,?)',(result['id'],eid,self.s['phone'],plan,CATALOG[plan],'INR','Pending',None,time.time()))
-        return self.response(200,{'orderId':result['id'],'keyId':os.environ['RAZORPAY_KEY_ID'],'amount':CATALOG[plan],'currency':'INR','name':'Shaadi Sync','plan':plan})
+        return self.response(200,{'orderId':result['id'],'keyId':os.environ['RAZORPAY_KEY_ID'],'amount':CATALOG[plan],'currency':'INR','name':'ShaadiVerse','plan':plan})
     def activate_payment(self,payment):
         with conn(True) as c:
             if os.environ.get('DATABASE_URL'):c.execute('SELECT id FROM purchases WHERE id=? FOR UPDATE',(payment.get('order_id'),))

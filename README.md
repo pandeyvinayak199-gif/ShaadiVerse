@@ -1,4 +1,4 @@
-# Shaadi Sync · Investor & Pilot Edition 1.0
+# ShaadiVerse · Investor & Pilot Edition 1.0
 
 The current release is an isolated, sample-data investor demonstration with a guided walkthrough, role switching, reset, consent-based pilot survey, and connect-later checklists. SMS, WhatsApp and payments are deferred.
 

@@ -1,4 +1,4 @@
-# Shaadi Sync 1.0 — investor demonstration and concept pilot
+# ShaadiVerse 1.0 — investor demonstration and concept pilot
 
 This release is the fixed demo scope for the current stage. It demonstrates the product; it is not a claim that the entire original production brief or live provider onboarding is complete.
 

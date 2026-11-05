@@ -17,7 +17,7 @@ TLS verification stays enabled. Remote connections use `sslmode=verify-full`; do
 
 App tables live in **`shaadi_sync`**, not the public API schema. Row-level security is enabled with no anonymous access policies; access is through the server’s authorised, event-scoped API. Don’t add this schema to Supabase’s exposed schemas or give public API users table privileges. The server-side database connection must be a role authorised to own and migrate this application schema. Never place the database URL or a service-role key in browser JavaScript.
 
-Recognised legacy Shaadi Sync public tables are moved transactionally to the private schema. Unrelated project tables are untouched; ambiguous overlapping app tables cause migration to stop instead of overwriting data. Connecting a new PostgreSQL database does **not** copy an old SQLite file. The existing fallback SQLite demo is sample data; back up any wanted data before changing its storage.
+Recognised legacy ShaadiVerse public tables are moved transactionally to the private schema. Unrelated project tables are untouched; ambiguous overlapping app tables cause migration to stop instead of overwriting data. Connecting a new PostgreSQL database does **not** copy an old SQLite file. The existing fallback SQLite demo is sample data; back up any wanted data before changing its storage.
 
 ## View real pilot feedback privately
 
