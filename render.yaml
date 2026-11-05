@@ -4,13 +4,17 @@ services:
     name: shaadi-sync-demo
     runtime: python
     plan: free
-    buildCommand: python -m py_compile server.py
+    buildCommand: pip install -r requirements.txt
     startCommand: python server.py
     healthCheckPath: /api/health
     autoDeployTrigger: off
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.14
+      - key: TRUST_PROXY
+        value: "1"
+      - key: COOKIE_SECURE
+        value: "1"
       - key: DEMO_MODE
         value: "1"
       - key: DATABASE_PATH

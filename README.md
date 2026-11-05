@@ -1,59 +1,97 @@
 # Shaadi Sync
 
-A responsive, persistent wedding-planning **development prototype**, built with Python 3.12+ (standard library), SQLite, and plain JavaScript. No package installation, paid services, or credentials needed.
+A mobile-first wedding planner with event-isolated accounts, guest RSVP, a timeline, vendors, expenses, signed QR entry, team permissions, and live-service adapters. The existing hosted free demo remains a sandbox.
 
-## Run
+## Run locally
+
+Python 3.12+:
 
 ```sh
-cd /workspace/ShaadiVerse
-python server.py
+python -m pip install -r requirements.txt
+DEMO_MODE=1 python server.py
 ```
 
-The server listens on port **3000** (`PORT` overrides it). The first launch seeds Rahul & Priya's wedding. `DATABASE_PATH` overrides the SQLite file location. Visit the application in your local browser or your environment's supported preview. Choose **Explore Rahul & Priya’s wedding**, or select another demo role. Each HTTP request enforces role restrictions in the backend.
+Open the server on port **3000**. `DEMO_MODE=1` seeds Rahul & Priya only when the database is empty and explicitly enables sample-role sign-in and visible sandbox OTPs. Use the phone form to create a separate sandbox account and your own event. **Never treat a sandbox OTP as verified phone ownership.**
 
-For registered guest OTP, use a seeded number such as `9000000000`. The sandbox generates a code and displays it in the verification dialog; no SMS is sent. This verifies the sandbox flow, **not real phone ownership**.
+For verified-user mode, use `DEMO_MODE=0` (the default), configure Twilio Verify, and use persistent storage. Live mode disables demo roles, does not return OTPs, and rejects sessions issued in sandbox mode. The server reads process variables; `.env.example` documents names but is not automatically loaded. Enter credentials in hosting settings, never in Git or chat.
 
-## Implemented
+## What is now implemented
 
-- Six demo roles: organiser, co-organiser, finance, vendor, guest, hotel partner.
-- Seeded wedding dashboard, countdown, live-from-database headcount, upcoming celebrations, tasks, budget summary, responsive navigation, light/dark mode, RSVP confetti, local palace illustration.
-- Guest creation/editing, search, side/status filters, quoted CSV import and CSV export.
-- Guest-only RSVP with consent and plus-one limit validation.
-- Event code join requests and organiser approval. Joining alone does not grant access. Regenerating the event code invalidates the old code.
-- Sub-event timeline, venue map links, and dress codes.
-- Vendor details and vendor-scoped API responses.
-- Expense creation, finance cap enforcement, large-expense approval requirement, paid/outstanding summaries, CSV and print-to-PDF, database audit entries.
-- Manual reference-based online gate check-in with duplicate detection and entry logging.
-- Hotel room-block summaries, transport details, arrival board, catering plate comparisons, dietary counts.
-- Editable tasks, private gift/shagun records and thank-you status/export, guest song requests, one-vote-per-user polls, hashtag ideas, shareable WhatsApp invitation URL.
-- Explicitly labelled sandbox WhatsApp response and plan previews; no real messages or payments.
-- Organiser-editable event details and five colour palettes, guest consent-based travel milestones, and restricted finance audit viewer.
+- **Storage:** additive migration of the existing SQLite data; WAL and transactional writes; durable hashed sessions, expiring OTP challenges, attempt limits, account and event memberships, audit records, payment orders and a message outbox. SQLite can use a mounted disk; `DATABASE_URL` selects PostgreSQL. PostgreSQL transactions and row locks protect admission and finance limits.
+- **Accounts:** real Twilio Verify adapter, India +91 mobile normalization, single-use verification, resend/attempt limits, 24-hour sessions, logout invalidation, HttpOnly/SameSite cookies, production Secure-cookie setting, JSON/Origin/CSRF checks. Render blueprints enable trusted-proxy client identification for IP limits; leave `TRUST_PROXY=0` for direct local access. No caller-selected role in live mode.
+- **Events:** verified users create events, switch among their own memberships, share real invitation URLs, regenerate codes, approve join requests and revoke access. Codes never reveal guest records. Staff permissions are assigned by the organiser; finance is capped at five members. Vendor/hotel accounts are bound to one linked entity. Pre-registered guests join only after verifying their own phone.
+- **QR:** signed, unguessable, revocable passes rendered by a pinned QR library; guest-private QR download; camera decoding with bundled MIT-licensed jsQR; transactional duplicate and plus-one checks; staff logs and request idempotency. Offline scans are **pending**, not approvals, until the server confirms them. The service worker caches the application shell, not guest/API/pass responses. Pending scans are scoped to the current account/event and cleared on logout.
+- **WhatsApp:** consent-gated invitation-template queue, explicit user-triggered dispatch, delivery webhooks, signed/context-bound Yes/No/Maybe RSVP callbacks, failure review and webhook replay protection. Sandbox mode sends nothing.
+- **Payments:** server-priced Razorpay Event Pass checkout (₹2,999 per event), order records, checkout signature and captured-payment validation, signed webhooks, idempotent activation, a payment receipt, and Free-plan limits. A Free event supports 50 guests, invitations, RSVP and timeline; vendor/expense/QR features use Event Pass. Guests always keep access to their invitation and RSVP. No payments occur in demo mode.
+- Existing dashboard, responsive light/dark UI, themes, countdown, guest CSV, timeline, tasks, travel milestones, catering, gifts, songs and polls remain available.
+
+## Keep the free demo
+
+The root `render.yaml` still uses a **free** web service and an ephemeral database. It now installs the QR and PostgreSQL dependencies. It keeps demo mode, password protection and manual deployment. No paid plan is activated by this repository change. The Render-generated `DEMO_ACCESS_PASSWORD` protects the optional demo with username `demo`.
+
+To update that demo after code is pushed, use Render’s **Manual Deploy → Deploy latest commit**. The updated demo still may sleep and lose sample edits on restart. It is not durable hosting for real guests.
+
+## Permanent storage: choose later
+
+Both options are prepared; neither was purchased or activated:
+
+1. **Render disk:** `deploy/render-disk.yaml` describes a separate **paid starter** service with a 1 GB disk at `/var/data`. The database is `/var/data/shaadi.sqlite3`; demo mode is off. Import this blueprint only after deliberately choosing the paid service. Disk persistence is separate from backups. Keep one application instance for this SQLite configuration.
+2. **Existing PostgreSQL:** `deploy/render-postgres.yaml` uses a free web service with a database you supply separately through `DATABASE_URL`. It does not buy or create a database. Durability, expiration and backups depend on your chosen provider. Remote connections require `sslmode=verify-full`, using system certificate trust by default; supply the appropriate trusted CA through libpq settings for a private CA. Loopback development databases may omit TLS.
+
+Run `python manage.py check` against the intended configured database before use. SQLite migrations, backups and restart persistence are tested locally; no external PostgreSQL service was configured or validated in this workspace.
+
+### Preserve data and back up
+
+Existing SQLite records are migrated in place; they are not reset. Legacy demo sessions were memory-only and must sign in again. Legacy seeded data does not grant unverified users organiser access in live mode.
+
+```sh
+DATABASE_PATH=/var/data/shaadi.sqlite3 python manage.py backup /secure/location/shaadi-backup.sqlite3
+```
+
+This uses SQLite’s online backup API, validates the result and refuses overwrites. Backups contain personal data and signing/session information. Keep them private and copy them outside the service disk. For PostgreSQL, use provider-managed backups or `pg_dump`; the SQLite backup command does not pretend to back up PostgreSQL. To move an existing SQLite application to a disk, back it up first, stop writes, place the intact backup at the new `DATABASE_PATH`, then start and run `manage.py check`. Do not delete the source until independently verified. Importing an existing SQLite dataset into PostgreSQL requires a separate data migration; changing `DATABASE_URL` alone does not copy records.
+
+## Connect real services
+
+No live credentials are currently supplied, and provider delivery/capture has not been live-tested. Missing configuration returns an explicit unavailable response; there is no silent mock fallback. Use service test/sandbox accounts first and perform an authorised real-device smoke check before inviting guests.
+
+### Phone OTP: Twilio Verify
+
+Configure `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`. Enable SMS to India in your Twilio account, including any sender, destination, trial-recipient or regulatory approvals your account requires. Set `DEMO_MODE=0`, `COOKIE_SECURE=1` and `PUBLIC_BASE_URL` to your HTTPS app URL. Sign-in and event creation then use verified phone ownership. Only India (+91) numbers are currently supported.
+
+### WhatsApp Cloud API
+
+Configure `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TEMPLATE_NAME`, `WHATSAPP_TEMPLATE_LANGUAGE`, `WHATSAPP_APP_SECRET`, and an independently chosen `WHATSAPP_VERIFY_TOKEN`.
+
+Approve a Meta invitation template whose body has exactly three text parameters, in order: **guest name**, **event name**, **event code**. For a template with three quick-reply buttons (Yes, No, Maybe), set `WHATSAPP_RSVP_BUTTONS=1`; the adapter supplies the payloads `RSVP_YES`, `RSVP_NO`, `RSVP_MAYBE`. Configure the webhook as `https://YOUR-APP/api/webhooks/whatsapp`, with the verify token, and subscribe to messages. Callback signatures are checked against the app secret; RSVP replies must reference an outbound provider message and match its recipient.
+
+Guests explicitly opt in during RSVP and can opt out on a subsequent RSVP. Organisers select eligible recipients and queue invitations, then review and explicitly send up to 20 at a time in Settings. Failed or uncertain deliveries need provider-log review; they are not automatically retried. No automated reminder scheduler or arbitrary free-text broadcasts are included in this release. WhatsApp provider charges can apply when you explicitly dispatch.
+
+### Razorpay
+
+Configure `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and a separate `RAZORPAY_WEBHOOK_SECRET`. Start with Razorpay **test mode**. Configure `https://YOUR-APP/api/webhooks/razorpay` for `payment.captured`. Checkout callbacks activate a plan only after fetching and matching a captured payment; signed captured webhooks provide recovery if the browser closes. Editing the event cannot change its paid plan.
+
+₹2,999 is the current server catalog price in `server.py`, in paise. Review your business pricing before connecting live keys. The downloadable document is a **payment receipt**, not a GST tax invoice. Seller GST/billing configuration, Planner Pro recurring subscriptions, refunds/cancellations and marketplace payouts are not implemented. Razorpay/provider account activation and live capture still require account-side setup and testing.
 
 ## Validation
 
 ```sh
 python -m unittest discover -s tests -v
 node --check static/app.js
+node --check static/features.js
 ```
 
-Tests use a separate temporary database and exercise authentication requirements, guest privacy, vendor scope, finance cap, approval threshold, join isolation, plus-one limits, duplicate entry detection, source-file disclosure prevention, travel consent, duplicate voting, audit privacy, and logout invalidation.
+Integration tests use disposable SQLite databases, explicit sandbox mode or mocked live providers, and no real messages/charges. They exercise data isolation, authentication/CSRF, OTP limits, staff scopes, migration, backups, capacity limits, tampered/revoked QR passes, concurrent duplicates, offline request idempotency, payment amounts/signatures/capture/webhook replay and WhatsApp consent/callbacks.
 
-Optional browser checks (with Playwright installed and `/usr/bin/chromium` available): start the app, then run `node tests/browser-smoke.cjs`. Override `APP_URL` and `CHROMIUM_PATH` as needed. The smoke check saves the existing event name and changes the demo guest travel milestone to Left home. They require permission to open a loopback socket.
+Optional browser validation (Playwright and Chromium required):
 
-## Scope and production work still required
+```sh
+# Start an isolated sample instance in a separate terminal:
+DEMO_MODE=1 DATABASE_PATH=/tmp/shaadi-browser.sqlite3 PORT=3001 python server.py
+APP_URL=http://127.0.0.1:3001 node tests/browser-features.cjs
+```
 
-This is a first working prototype, **not the complete production specification**. It currently manages one seeded event. Event creation/multiple-event workflows, full co-organiser permission configuration, member-bound staff authentication, access revocation, real QR generation and camera/offline scanning, transfer approval, photo/ID/contract/receipt upload storage, room assignments, per-category budget editing, automatic reminders, seating drag-and-drop, memory book, invitation builder, Hindi translations, enforceable billing/plan gates, Razorpay, GST invoices, platform-admin metrics, partner marketplace models, and scheduled 30-day data deletion are not implemented.
+Use a fresh disposable database for each browser run: it creates accounts/events, assigns a team member and checks in sample guests. `CHROMIUM_PATH` overrides `/usr/bin/chromium`. This validates actual SVG encoding/decoding, mobile layout, online/duplicate/offline gate states, sync, account creation and invitations. Camera hardware permissions and real provider delivery still require device/account checks.
 
-Demo login deliberately permits choosing any seeded role. **Do not expose this server to untrusted users or store actual guest/ID information.** `DEMO_MODE=0` disables role switching, but does not make sandbox OTP production safe. Before deployment replace sandbox authentication with a verified SMS provider, bind users to event-scoped membership, use expiring durable sessions, secure cookies behind HTTPS, rate limits and CSRF protection, robust schema validation, transactional check-ins and approvals, migrations/backups, and a production application server.
+## Remaining original-brief work
 
-Sessions expire after 24 hours and are invalidated on logout. Sessions and pending OTPs are memory-only; application data persists in SQLite. Processes must be restarted in a new environment. Use the existing checkout; no worktree is needed. No environment configuration was published or modified as part of this application build.
-
-## Open a private hosted demo with Render
-
-This repository includes `render.yaml` for a **free-tier sandbox demo**. Connect this repository in Render's Blueprint workflow. After deployment, Render supplies the actual HTTPS application URL. No public deployment has been made merely by adding this file.
-
-The site is password protected when `DEMO_ACCESS_PASSWORD` is set. On Render, open the service's Environment settings to retrieve the generated value securely. Use browser login **`demo`** and that password. Do not paste the password into chat or commit it. The health endpoint remains public for platform probes and returns no event data.
-
-The free instance uses an ephemeral SQLite database: demo edits may disappear on restart/redeploy, and sessions expire on restart. It may sleep while idle. Use sample data only; this is a private demonstration, not production hosting. Automatic deployments are disabled in this blueprint.
-
-For a local password-protected run, supply `DEMO_ACCESS_PASSWORD` through your process environment and start `python server.py`. Without the variable, local development keeps its existing behaviour.
+These five recommended upgrades are implemented in code and need the hosting/provider activation described above. This is still not every feature in the much larger original brief: seating drag-and-drop, ID/photo/contract/receipt uploads, per-guest hotel-room assignments, automatic personal-data deletion, Hindi translations, memory books, invitation animation, planner subscriptions, platform admin and marketplace features remain separate work. Offline scanning intentionally does not claim multi-device admission authority while disconnected.

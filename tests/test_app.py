@@ -5,19 +5,24 @@ import base64
 class AppTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
-  cls.temp=tempfile.TemporaryDirectory();server.DB=os.path.join(cls.temp.name,'test.sqlite3');server.initialize()
+  cls.demo=patch.dict(os.environ,{'DEMO_MODE':'1','DATABASE_URL':''});cls.demo.start();cls.temp=tempfile.TemporaryDirectory();server.DB=os.path.join(cls.temp.name,'test.sqlite3');server.initialize()
   cls.http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler);cls.base='http://127.0.0.1:'+str(cls.http.server_port)
   threading.Thread(target=cls.http.serve_forever,daemon=True).start()
  @classmethod
- def tearDownClass(cls):cls.http.shutdown();cls.temp.cleanup()
+ def tearDownClass(cls):cls.http.shutdown();cls.temp.cleanup();cls.demo.stop()
  def req(self,path,body=None,cookie=None):
   headers={'Content-Type':'application/json'}
-  if cookie:headers['Cookie']=cookie
+  if cookie:
+   headers['Cookie']=cookie
+   if hasattr(self,'csrf') and cookie in self.csrf:headers['X-CSRF-Token']=self.csrf[cookie]
   r=urllib.request.Request(self.base+'/api/'+path,data=json.dumps(body).encode() if body is not None else None,headers=headers)
   try:
    with urllib.request.urlopen(r) as res:return res.status,json.load(res),res.headers.get('Set-Cookie')
   except urllib.error.HTTPError as e:return e.code,json.load(e),None
- def login(self,role):return self.req('auth/demo',{'role':role})[2].split(';')[0]
+ def login(self,role):
+  _,data,header=self.req('auth/demo',{'role':role});cookie=header.split(';')[0]
+  if not hasattr(self,'csrf'):self.csrf={}
+  self.csrf[cookie]=data['csrf'];return cookie
  def test_hosted_demo_password(self):
   with patch.dict(os.environ,{'DEMO_ACCESS_PASSWORD':'unit-test-password'}):
    self.assertEqual(self.req('health')[0],200)
@@ -35,8 +40,8 @@ class AppTests(unittest.TestCase):
   _,data,_=self.req('state',cookie=self.login('Vendor'));self.assertEqual(len(data['vendors']),1);self.assertNotIn('guests',data);self.assertNotIn('expenses',data)
  def test_finance_cap(self):
   cookie=self.login('Super Organiser')
-  for i in range(5):self.assertEqual(self.req('save',{'kind':'members','item':{'name':str(i),'role':'Finance Team'}},cookie)[0],200)
-  self.assertEqual(self.req('save',{'kind':'members','item':{'name':'sixth','role':'Finance Team'}},cookie)[0],400)
+  for i in range(5):self.assertEqual(self.req('save',{'kind':'members','item':{'name':str(i),'phone':'988888880'+str(i),'role':'Finance Team'}},cookie)[0],200)
+  self.assertEqual(self.req('save',{'kind':'members','item':{'name':'sixth','phone':'9888888899','role':'Finance Team'}},cookie)[0],400)
  def test_checkin_duplicate(self):
   cookie=self.login('Super Organiser');g=next(x for x in server.rows('guests') if x['status']=='Confirmed')
   self.assertEqual(self.req('checkin',{'guestId':g['id']},cookie)[0],200);self.assertEqual(self.req('checkin',{'guestId':g['id']},cookie)[0],409)
