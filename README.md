@@ -125,3 +125,7 @@ In Celebrations, organisers and guests can add a song name, optional artist and 
 ## Memories shared photo albums
 
 **Memories → Create our Memories album** gives each event a guest QR/link and a separate private host link. Guests enter a name, upload multiple photos, browse everyone’s photos and download individual images or a selected ZIP. Photos use the existing private database, including Supabase when configured; no new service credentials are needed. JPEG/PNG/WebP/HEIC uploads are validated, optimised for sharing and stripped of original location metadata. Finite storage/file-size limits are explicit. Hosts can pause uploads/access, rotate guest links and remove photos. See the [Memories guide](docs/MEMORIES.md), especially saving the private host link before resetting a demo.
+
+### Help box
+
+The floating **✧ Help** button provides built-in app guidance for guests and organisers. Optional live AI can be enabled with a server-side OpenAI key; see [AI help setup](docs/AI-HELP.md).

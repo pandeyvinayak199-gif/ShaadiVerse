@@ -1,0 +1,15 @@
+/* Help conversations live only in this open dialog. No wedding records are sent. */
+const helpLauncher=document.createElement('button');helpLauncher.id='help-launcher';helpLauncher.className='primary';helpLauncher.textContent='✧ Help';helpLauncher.setAttribute('aria-label','Open AI help');helpLauncher.setAttribute('aria-haspopup','dialog');document.body.append(helpLauncher);helpLauncher.onclick=openHelp;
+async function openHelp(){
+ modal('ShaadiVerse help',`<p class="subtitle" id="help-mode" role="status">Checking help availability…</p><p class="subtitle">Ask about using the app. Questions are sent to OpenAI when live AI is connected. Wedding records are never attached. Avoid sharing sensitive details.</p><div id="help-messages" role="log" aria-live="polite" aria-label="Help conversation"></div><div class="help-suggestions">${['How do I add photos?','How do I change the budget?','How do I RSVP?','How do I add a song?'].map(q=>`<button class="secondary" type="button" data-help-question="${esc(q)}">${esc(q)}</button>`).join('')}</div><form id="help-form"><label for="help-question">Your question</label><textarea id="help-question" name="question" maxlength="1200" rows="2" placeholder="How can I…" required></textarea><div class="form-actions"><button type="submit" class="primary">Ask help</button></div></form>`);
+ const form=$('#help-form'),question=$('#help-question'),mode=$('#help-mode'),messages=$('#help-messages');
+ function message(label,body){const item=document.createElement('p'),strong=document.createElement('strong'),text=document.createElement('span');strong.textContent=label+': ';text.textContent=body;item.append(strong,text);messages.append(item);messages.scrollTop=messages.scrollHeight}
+ try{const status=await api('help/status');mode.textContent=status.aiConfigured?'Live AI help · Answers can be mistaken.':'Built-in help · Live AI has not been connected yet.'}catch{mode.textContent='Help is temporarily unavailable. Please retry.'}
+ form.actionHandler=async values=>{
+  if(!state.user){message('Help','Please sign in or explore a demo wedding first, then ask your question.');return}
+  const text=values.question.trim();if(!text)return;
+  const buttons=Array.from($('#modal').querySelectorAll('button'));buttons.forEach(b=>b.disabled=true);question.disabled=true;form.setAttribute('aria-busy','true');message('You',text);mode.textContent='Finding an answer…';
+  try{const response=await api('help',{question:text});message('Help',response.answer);mode.textContent=response.notice||(response.mode==='ai'?'AI answer · Check important details with your organiser.':'Built-in help · Live AI has not been connected yet.');question.value=''}catch(e){message('Help',e.message);mode.textContent='Could not answer. Please retry.'}finally{buttons.forEach(b=>b.disabled=false);question.disabled=false;form.removeAttribute('aria-busy');if(question.isConnected)question.focus()}
+ };
+ $('#modal').querySelectorAll('[data-help-question]').forEach(button=>button.onclick=()=>{question.value=button.dataset.helpQuestion;form.requestSubmit()});question.focus();
+}

@@ -16,3 +16,8 @@
 .wedding-hero .hero-badge{position:relative;inset:auto;align-self:flex-end;max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}
 .budget-controls{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
 @media(max-width:760px){.wedding-hero .hero-badge{align-self:flex-start}.wedding-hero .countdown{gap:clamp(8px,3vw,18px)}.budget-controls button{flex:1 1 auto}}
+
+#help-launcher{position:fixed;right:18px;bottom:calc(20px + env(safe-area-inset-bottom));z-index:35;border-radius:28px;box-shadow:0 4px 18px #302c2a30;min-height:44px}
+#help-messages{max-height:32dvh;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap}#help-messages p{padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;line-height:1.6}
+.help-suggestions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.help-suggestions button{font-size:12px;text-align:left}#help-form textarea{width:100%;box-sizing:border-box;resize:vertical;min-height:64px}
+@media(max-width:760px){#help-launcher{right:12px;bottom:calc(82px + env(safe-area-inset-bottom));font-size:12px;padding:10px 14px}}

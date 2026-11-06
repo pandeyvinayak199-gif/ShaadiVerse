@@ -5,7 +5,7 @@ from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, unquote, parse_qs
-import storage, providers, memories
+import storage, providers, memories, help_assistant
 from seed import demo_records
 
 DB=os.environ.get('DATABASE_PATH','shaadi.sqlite3')
@@ -181,6 +181,7 @@ class Handler(SimpleHTTPRequestHandler):
                     if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),self.s['csrf']):raise HTTPError(403,'Refresh the page before making this request.')
                 return self.post(path,body)
             if path.startswith('/api/memories/'):return self.memory_get(path,query)
+            if path=='/api/help/status':return self.response(200,{'aiConfigured':help_assistant.ready()})
             if path=='/api/health':return self.response(200,{'ok':True})
             if path=='/api/bootstrap':return self.response(200,{'demoMode':demo_mode(),'smsReady':providers.sms_ready(),'whatsappReady':providers.whatsapp_ready(),'paymentsReady':providers.payments_ready(),'databaseConfigured':bool(os.environ.get('DATABASE_URL')),'release':'investor-pilot','version':'1.0','sandboxOtpAvailable':sandbox_otp()})
             if path=='/api/webhooks/whatsapp':
@@ -370,6 +371,10 @@ class Handler(SimpleHTTPRequestHandler):
         if path=='/api/join':return self.join(b)
         if not self.s:raise HTTPError(401,'Please sign in')
         s=self.s;eid=s['event_id']
+        if path=='/api/help':
+            question=text(b.get('question'),1200)
+            with conn(True) as c:limit(c,'help:'+s['phone'],20,3600)
+            return self.response(200,help_assistant.answer(question,s.get('role') or 'Account holder'))
         if path=='/api/auth/logout':
             with conn(True) as c:c.execute('DELETE FROM sessions WHERE token_hash=?',(s['token_hash'],))
             return self.response(200,{'ok':True},'session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
