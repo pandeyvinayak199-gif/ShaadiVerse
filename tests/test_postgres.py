@@ -78,3 +78,15 @@ class PostgreSQLRelease(WorkflowCase):
    self.assertEqual(server.rows('event',1,c)[0]['name'],'Preserved wedding')
    self.assertIsNone(c.execute("SELECT to_regclass('public.records') AS t").fetchone()['t'])
    self.assertEqual(c.execute('SELECT id FROM public.unrelated_project_data').fetchone()['id'],7)
+ def test_postgres_song_audio_persists_and_is_private(self):
+  import base64,urllib.request
+  from test_song_audio import audio_bytes
+  self.start();owner=self.demo();status,song,_=self.req('save',{'kind':'songs','item':{'name':'Postgres mashup'}},owner);self.assertEqual(status,200)
+  raw=audio_bytes();status,data,_=self.req('song-audio',{'songId':song['id'],'filename':'mashup.wav','data':base64.b64encode(raw).decode(),'consent':True},owner);self.assertEqual(status,201,data)
+  server.initialize();state=self.req('state',cookie=owner)[1];self.assertIn('audio',next(s for s in state['songs'] if s['id']==song['id']))
+  request=urllib.request.Request(self.url+'/api/song-audio/'+str(song['id']),headers={'Cookie':owner,'Range':'bytes=0-49'})
+  with urllib.request.urlopen(request) as response:self.assertEqual(response.status,206);self.assertEqual(response.read(),raw[:50])
+  with server.conn() as c:
+   row=c.execute("SELECT relrowsecurity FROM pg_class WHERE oid='shaadi_sync.song_audio'::regclass").fetchone();self.assertTrue(row['relrowsecurity'])
+  other=self.demo();self.assertNotEqual(self.req('state',cookie=owner)[1]['event'][0]['id'],self.req('state',cookie=other)[1]['event'][0]['id'])
+  self.assertEqual(self.req('song-audio/remove',{'songId':song['id']},other)[0],404)

@@ -3,7 +3,7 @@ import os, sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-APP_TABLES=['records','audit','users','memberships','sessions','challenges','settings','limits','purchases','outbox','event_codes','webhook_events','feedback','memory_albums','memory_visitors','memory_photos']
+APP_TABLES=['records','audit','users','memberships','sessions','challenges','settings','limits','purchases','outbox','event_codes','webhook_events','feedback','memory_albums','memory_visitors','memory_photos','song_audio']
 
 class PGConnection:
     def __init__(self, url):
@@ -66,6 +66,7 @@ def migrate(path):
                             c.execute('ALTER TABLE public.'+table+' SET SCHEMA shaadi_sync')
         c.executescript(f'''
         CREATE TABLE IF NOT EXISTS records(id {pk},kind TEXT NOT NULL,data TEXT NOT NULL,event_id INTEGER NOT NULL DEFAULT 1);
+        CREATE TABLE IF NOT EXISTS song_audio(song_id BIGINT PRIMARY KEY REFERENCES records(id) ON DELETE CASCADE,event_id INTEGER NOT NULL,filename TEXT NOT NULL,mime TEXT NOT NULL,extension TEXT NOT NULL,size BIGINT NOT NULL,duration DOUBLE PRECISION NOT NULL,content {binary} NOT NULL,updated DOUBLE PRECISION NOT NULL);
         CREATE TABLE IF NOT EXISTS audit(id {pk},actor TEXT,action TEXT,created DOUBLE PRECISION,event_id INTEGER NOT NULL DEFAULT 1);
         CREATE TABLE IF NOT EXISTS users(phone TEXT PRIMARY KEY,name TEXT NOT NULL,created DOUBLE PRECISION NOT NULL);
         CREATE TABLE IF NOT EXISTS memberships(event_id INTEGER,phone TEXT,role TEXT NOT NULL,entity_id INTEGER,permissions TEXT NOT NULL DEFAULT '[]',revoked INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(event_id,phone));
@@ -93,6 +94,7 @@ def migrate(path):
             c.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS auth_mode TEXT NOT NULL DEFAULT 'legacy'")
         elif 'auth_mode' not in [r['name'] for r in c.execute('PRAGMA table_info(sessions)')]:
             c.execute("ALTER TABLE sessions ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'legacy'")
+        c.execute('CREATE INDEX IF NOT EXISTS song_audio_event ON song_audio(event_id)')
         c.execute('CREATE INDEX IF NOT EXISTS records_scope ON records(event_id,kind)')
         c.execute('CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires)')
         c.execute('CREATE INDEX IF NOT EXISTS memory_photos_album ON memory_photos(album_id,created,id)')

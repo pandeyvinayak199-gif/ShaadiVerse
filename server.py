@@ -5,7 +5,7 @@ from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, unquote, parse_qs, urlencode
-import storage, providers, memories, help_assistant, guest_planning
+import storage, providers, memories, help_assistant, guest_planning, song_audio
 from seed import demo_records
 
 DB=os.environ.get('DATABASE_PATH','shaadi.sqlite3')
@@ -21,7 +21,13 @@ def conn(write=False):return storage.connect(DB,write)
 def rows(kind,event_id=1,c=None):
     if c is None:
         with conn() as db:return rows(kind,event_id,db)
-    return [dict(json.loads(r['data']),id=r['id']) for r in c.execute('SELECT id,data FROM records WHERE kind=? AND event_id=? ORDER BY id',(kind,event_id))]
+    items=[dict(json.loads(r['data']),id=r['id']) for r in c.execute('SELECT id,data FROM records WHERE kind=? AND event_id=? ORDER BY id',(kind,event_id))]
+    if kind=='songs':
+        attachments=song_audio.metadata(c,event_id)
+        for item in items:
+            item.pop('audio',None)
+            if item['id'] in attachments:item['audio']=attachments[item['id']]
+    return items
 def insert(c,kind,data,event_id):
     return c.execute('INSERT INTO records(kind,data,event_id) VALUES(?,?,?) RETURNING id',(kind,json.dumps(data,allow_nan=False),event_id)).fetchone()['id']
 def update(c,kind,data,event_id):
@@ -162,11 +168,11 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             parsed=urlparse(self.path);path=parsed.path;query=parse_qs(parsed.query);self.s=session_for(self)
             if post:
-                if path=='/api/memories/upload':
-                    if not MEMORY_UPLOAD_SLOTS.acquire(blocking=False):raise HTTPError(503,'Photos are being processed. Please retry this upload shortly.')
+                if path in ['/api/memories/upload','/api/song-audio']:
+                    if not MEMORY_UPLOAD_SLOTS.acquire(blocking=False):raise HTTPError(503,'Uploads are being processed. Please retry shortly.')
                     memory_upload_slot=True
                 length=int(self.headers.get('Content-Length','0'))
-                if length<0 or length>(22*1024*1024 if path=='/api/memories/upload' else 1000000):raise HTTPError(413,'Request too large')
+                if length<0 or length>(29*1024*1024 if path=='/api/song-audio' else 22*1024*1024 if path=='/api/memories/upload' else 1000000):raise HTTPError(413,'Request too large')
                 raw=self.rfile.read(length)
                 if path.startswith('/api/webhooks/'):
                     return self.response(200,self.webhook(path,raw))
@@ -182,6 +188,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.post(path,body)
             if path.startswith('/api/memories/'):return self.memory_get(path,query)
             if path=='/api/help/status':return self.response(200,{'aiConfigured':help_assistant.ready()})
+            if path.startswith('/api/song-audio/'):return self.song_audio_get(path,query)
             if path=='/api/health':return self.response(200,{'ok':True})
             if path=='/api/bootstrap':return self.response(200,{'demoMode':demo_mode(),'smsReady':providers.sms_ready(),'whatsappReady':providers.whatsapp_ready(),'paymentsReady':providers.payments_ready(),'databaseConfigured':bool(os.environ.get('DATABASE_URL')),'release':'investor-pilot','version':'1.0','sandboxOtpAvailable':sandbox_otp()})
             if path=='/api/webhooks/whatsapp':
@@ -209,6 +216,7 @@ class Handler(SimpleHTTPRequestHandler):
             target=(Path(__file__).parent/'static'/('index.html' if path=='/' else 'memories.html' if path=='/memories' else unquote(path).lstrip('/'))).resolve()
             if not target.is_relative_to((Path(__file__).parent/'static').resolve()) or not target.is_file():raise HTTPError(404,'Not found')
             content=target.read_bytes();self.send_response(200);self.send_header('Content-Type','application/manifest+json' if target.suffix=='.webmanifest' else self.guess_type(str(target)));self.send_header('X-Content-Type-Options','nosniff');self.send_header('Referrer-Policy','no-referrer' if path=='/memories' else 'same-origin');self.end_headers();self.wfile.write(content)
+        except song_audio.AudioError as e:self.response(e.status,{'error':str(e)})
         except memories.AlbumError as e:self.response(e.status,{'error':str(e)})
         except HTTPError as e:self.response(e.status,{'error':str(e)})
         except providers.ProviderError as e:self.response(503,{'error':str(e)})
@@ -218,6 +226,25 @@ class Handler(SimpleHTTPRequestHandler):
             self.response(500,{'error':'The request could not be completed. Please retry.'})
         finally:
             if memory_upload_slot:MEMORY_UPLOAD_SLOTS.release()
+    def song_audio_get(self,path,query):
+        song_id=guest_planning.integer(path.rsplit('/',1)[-1],1,10**15)
+        row=song_audio.download(conn,self.s,song_id);raw=bytes(row['content']);size=len(raw);start=0;end=size-1;partial=False
+        value=self.headers.get('Range')
+        if value:
+            match=re.fullmatch(r'bytes=(\d*)-(\d*)',value)
+            try:
+                if not match or not any(match.groups()):raise ValueError()
+                if not match[1]:start=max(0,size-int(match[2]))
+                else:start=int(match[1])
+                end=min(size-1,int(match[2])) if match[1] and match[2] else size-1
+                if start>end or start>=size:raise ValueError()
+            except ValueError:
+                self.send_response(416);self.send_header('Content-Range',f'bytes */{size}');self.send_header('Content-Length','0');self.end_headers();return
+            partial=True
+        body=raw[start:end+1];self.send_response(206 if partial else 200);self.send_header('Content-Type',row['mime']);self.send_header('Content-Length',str(len(body)));self.send_header('Accept-Ranges','bytes');self.send_header('Cache-Control','private, no-store');self.send_header('X-Content-Type-Options','nosniff')
+        if partial:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
+        mode='attachment' if query.get('download')==['1'] else 'inline'
+        self.send_header('Content-Disposition',mode+'; filename="wedding-mashup.'+row['extension']+'"');self.end_headers();self.wfile.write(body)
     def memory_service(self):
         base=os.environ.get('PUBLIC_BASE_URL','').rstrip('/')
         if not base:
@@ -413,10 +440,18 @@ class Handler(SimpleHTTPRequestHandler):
                     g.update(travel=b['travel'],consent=True)
                 update(c,'guests',g,eid);audit(c,s,'Guest updated RSVP' if path=='/api/rsvp' else 'Guest shared a travel milestone')
             return self.response(200,{'ok':True})
+        if path=='/api/song-audio':
+            with conn(True) as c:limit(c,'song-audio:'+s['phone'],30,3600)
+            return self.response(201,song_audio.upload(conn,s,b))
+        if path=='/api/song-audio/remove':return self.response(200,song_audio.remove(conn,s,b.get('songId')))
         if path=='/api/song':
             self.require_role('Guest')
-            with conn(True) as c:insert(c,'songs',{**song_fields(b),'owner':s['name'],'requestedBy':s['phone'],'status':'Pending'},eid)
-            return self.response(201,{'ok':True})
+            with conn(True) as c:
+                if b.get('id'):
+                    old=song_audio.song(c,s,b['id']);data={**old,**song_fields(b),'id':b['id'],'status':'Pending'};update(c,'songs',data,eid);song_id=b['id']
+                else:song_id=insert(c,'songs',{**song_fields(b),'owner':s['name'],'requestedBy':s['phone'],'status':'Pending'},eid)
+                audit(c,s,'Guest saved song request #'+str(song_id))
+            return self.response(201,{'ok':True,'id':song_id})
         if path=='/api/vote':
             self.require_role(*ROLES)
             with conn(True) as c:

@@ -2,3 +2,4 @@ qrcode==8.2
 psycopg[binary]==3.2.9
 Pillow==13.0.0
 pillow-heif==1.8.1
+mutagen==1.47.0
