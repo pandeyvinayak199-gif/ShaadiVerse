@@ -4,8 +4,8 @@ from datetime import date
 from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlparse, unquote, parse_qs
-import storage, providers, memories, help_assistant
+from urllib.parse import urlparse, unquote, parse_qs, urlencode
+import storage, providers, memories, help_assistant, guest_planning
 from seed import demo_records
 
 DB=os.environ.get('DATABASE_PATH','shaadi.sqlite3')
@@ -277,8 +277,9 @@ class Handler(SimpleHTTPRequestHandler):
         kinds=['event','timeline','announcements','polls']
         if role=='Super Organiser':kinds+=ALLOWED+['joins','entries','members','expenses']
         elif role=='Co-Organiser':kinds+=[k for k in ALLOWED+['joins','entries'] if s['demo_role'] or k in s['permissions']]
-        elif role=='Finance Team':kinds+=['expenses']
+        elif role=='Finance Team':kinds+=['expenses','vendors','vendor_payments']
         elif role=='Guest':kinds+=['transport','songs']
+        if role=='Super Organiser' or (role=='Co-Organiser' and (s['demo_role'] or 'vendors' in s['permissions'])):kinds+=['vendor_payments']
         data.update({k:rows(k,eid,c) for k in set(kinds)})
         if not data['event']:raise HTTPError(404,'Event no longer exists')
         for p in data['polls']:p['hasVoted']=s['phone'] in p.get('voters',[]);p.pop('voters',None)
@@ -286,8 +287,8 @@ class Handler(SimpleHTTPRequestHandler):
             gs=[g for g in rows('guests',eid,c) if owns_guest(g,s)]
             data['guests']=gs
             data['songs']=[song for song in data.get('songs',[]) if song.get('requestedBy')==s['phone']]
-            invited=set(gs[0].get('events',[])) if gs else set()
-            data['timeline']=[t for t in data['timeline'] if t['name'] in invited]
+            data['hotelOptions']=[{k:h.get(k) for k in ['id','name','address','checkin']} for h in rows('hotels',eid,c)]
+            if gs:data['guestAllowance']=guest_planning.allowance(gs[0],data['event'][0])
         if role=='Vendor':
             vendors=rows('vendors',eid,c);data['vendors']=[v for v in vendors if v['id']==s.get('entity_id') or (s['demo_role'] and v==vendors[0])]
         if role=='Hotel Partner':
@@ -391,15 +392,19 @@ class Handler(SimpleHTTPRequestHandler):
         if path=='/api/messages/dispatch':return self.dispatch_messages()
         if path=='/api/payments/order':return self.order(b)
         if path=='/api/payments/verify':return self.verify_payment(b)
+        if path=='/api/guest-limits':return self.guest_limits(b)
+        if path=='/api/guest-profile':return self.guest_profile(b)
+        if path.startswith('/api/vendor-payments/'):return self.vendor_payment(path,b)
         if path=='/api/rsvp' or path=='/api/guest-update':
             self.require_role('Guest')
             with conn(True) as c:
+                if os.environ.get('DATABASE_URL'):c.execute("SELECT id FROM records WHERE kind='event' AND event_id=? FOR UPDATE",(eid,))
                 g=next((g for g in rows('guests',eid,c) if owns_guest(g,s)),None)
                 if not g:raise HTTPError(404,'Guest not found')
                 if not b.get('consent'):raise HTTPError(400,'Explicit consent is required.')
                 if path=='/api/rsvp':
-                    status=b.get('status');plus=int(b.get('plusOnes',0))
-                    if status not in ['Confirmed','Declined','Maybe'] or not 0<=plus<=g.get('plusOnes',0):raise ValueError('Invalid RSVP')
+                    status=b.get('status');plus=guest_planning.integer(b.get('plusOnes',0),0,100)
+                    if status not in ['Confirmed','Declined','Maybe'] or not 0<=plus<=guest_planning.allowance(g,rows('event',eid,c)[0]):raise ValueError('Invalid RSVP')
                     g.update(status=status,attendingPlusOnes=plus,consent=True,whatsappConsent=bool(b.get('whatsappConsent')))
                     if status=='Confirmed':pass_token(c,eid,g)
                     else:g['passNonce']=secrets.token_urlsafe(18)
@@ -508,8 +513,9 @@ class Handler(SimpleHTTPRequestHandler):
                     data['code']=re.sub('[^A-Z0-9]+','-',data['name'].upper())[:35]+'-'+secrets.token_hex(4).upper()
                     c.execute('DELETE FROM event_codes WHERE event_id=?',(eid,));c.execute('INSERT INTO event_codes VALUES(?,?)',(data['code'],eid))
             elif kind=='guests':
-                data['name']=text(data.get('name'),80);data['phone']=phone_number(data.get('phone'));data['plusOnes']=int(data.get('plusOnes',0))
-                if not 0<=data['plusOnes']<=20:raise ValueError('plusOnes')
+                data['name']=text(data.get('name'),80);data['phone']=phone_number(data.get('phone'));data['plusOnes']=guest_planning.integer(data.get('plusOnes',guest_planning.limits(rows('event',eid,c)[0])['defaultPlusOnes']),0,100)
+                if data['plusOnes']>guest_planning.limits(rows('event',eid,c)[0])['maxPlusOnes']:raise HTTPError(400,'Plus-one allowance exceeds the limit in Settings.')
+                if old and data['plusOnes']<old.get('attendingPlusOnes',0):raise HTTPError(400,'This guest has already confirmed more plus-ones. Ask them to update their RSVP first.')
                 if data.get('status') not in ['To Be Invited','Invited','Confirmed','Declined','Maybe','Arrived','Checked In']:raise ValueError('status')
                 if data.get('status')=='Checked In' and (not old or old.get('status')!='Checked In'):raise HTTPError(400,'Use the gate scanner to check in a guest.')
                 if any(g['phone']==data['phone'] and g['id']!=item.get('id') for g in rows('guests',eid,c)):raise HTTPError(409,'This phone number is already on the guest list.')
@@ -538,11 +544,82 @@ class Handler(SimpleHTTPRequestHandler):
                 data.update(song_fields(data));data['owner']=text(data.get('owner') or s['name'],80)
                 data['requestedBy']=(old or {}).get('requestedBy',s['phone'])
                 data.setdefault('status','Pending')
-            elif kind=='timeline':date.fromisoformat(data['date']);text(data['name']);text(data['venue'])
+            elif kind=='timeline':
+                date.fromisoformat(data['date']);text(data['name']);text(data['venue'])
+                from datetime import time as clock_time
+                clock_time.fromisoformat(data.get('time') or '00:00')
+            elif kind=='hotels':
+                data['name']=text(data.get('name'));data['address']=text(data.get('address'));data['rooms']=guest_planning.integer(data.get('rooms'),0,10000);data['assigned']=guest_planning.integer(data.get('assigned',0),0,data['rooms']);data.setdefault('checkin','14:00')
+            elif kind=='vendors':
+                data['quote']=amount(data.get('quote',0));data['paid']=amount(data.get('paid',0))
+                if data['paid']>data['quote']:raise ValueError('Paid amount exceeds quote')
             if old:update(c,kind,data,eid)
             else:data['id']=insert(c,kind,data,eid)
             audit(c,s,'Saved '+str(kind)+' #'+str(data['id']))
         return self.response(200,{'ok':True,'id':data['id']})
+    def guest_limits(self,b):
+        self.can_manage('guests');eid=self.s['event_id'];settings=guest_planning.validate_limits(b.get('limits',{}));overrides=b.get('guests',[])
+        if not isinstance(overrides,list):raise ValueError('Guest limits')
+        with conn(True) as c:
+            if os.environ.get('DATABASE_URL'):c.execute("SELECT id FROM records WHERE kind='event' AND event_id=? FOR UPDATE",(eid,))
+            event=rows('event',eid,c)[0];guests=rows('guests',eid,c);by_id={g['id']:g for g in guests}
+            for item in overrides:
+                if not isinstance(item,dict) or item.get('id') not in by_id:raise HTTPError(404,'Guest not found in this wedding.')
+                g=by_id[item['id']];g['plusOnes']=guest_planning.integer(item.get('plusOnes'),0,settings['maxPlusOnes'])
+            for g in guests:
+                cap=min(g.get('plusOnes',settings['defaultPlusOnes']),settings['maxPlusOnes'],settings['maxFamilyMembers']-1)
+                if cap<g.get('attendingPlusOnes',0) or g.get('roomsRequired',0)>settings['maxRooms']:raise HTTPError(409,'A confirmed RSVP exceeds these limits. Ask that guest to update it first.')
+            event['guestLimits']=settings;update(c,'event',event,eid)
+            for item in overrides:update(c,'guests',by_id[item['id']],eid)
+            audit(c,self.s,'Updated guest limits and plus-one allowances')
+        return self.response(200,{'ok':True})
+    def guest_profile(self,b):
+        self.require_role('Guest');eid=self.s['event_id']
+        if b.get('consent') is not True:raise HTTPError(400,'Coordination consent is required.')
+        with conn(True) as c:
+            if os.environ.get('DATABASE_URL'):c.execute("SELECT id FROM records WHERE kind='event' AND event_id=? FOR UPDATE",(eid,))
+            g=next((g for g in rows('guests',eid,c) if owns_guest(g,self.s)),None)
+            if not g:raise HTTPError(404,'Guest not found.')
+            profile=guest_planning.profile(b,g,rows('event',eid,c)[0],rows('timeline',eid,c),rows('hotels',eid,c))
+            checked=g.get('status')=='Checked In';g.update(profile,consent=True,whatsappConsent=b.get('whatsappConsent') is True)
+            if checked and profile['status']=='Confirmed':g['status']='Checked In'
+            if profile['status']=='Confirmed':pass_token(c,eid,g)
+            else:g['passNonce']=secrets.token_urlsafe(18)
+            update(c,'guests',g,eid);audit(c,self.s,'Guest updated family, function RSVPs and stay request')
+        return self.response(200,{'ok':True})
+    def vendor_payment(self,path,b):
+        if self.s['role']=='Finance Team':self.require_role('Finance Team')
+        else:self.can_manage('vendors')
+        eid=self.s['event_id']
+        with conn(True) as c:
+            if os.environ.get('DATABASE_URL'):c.execute("SELECT id FROM records WHERE kind='event' AND event_id=? FOR UPDATE",(eid,))
+            v=next((v for v in rows('vendors',eid,c) if v['id']==b.get('vendorId')),None)
+            if not v:raise HTTPError(404,'Vendor not found in this wedding.')
+            if path=='/api/vendor-payments/details':
+                v['paymentDetails']=guest_planning.vendor_details(b);update(c,'vendors',v,eid);audit(c,self.s,'Updated vendor payment details #'+str(v['id']))
+                return self.response(200,{'ok':True})
+            value=round(amount(b.get('amount')),2)
+            if path=='/api/vendor-payments/record':
+                request_id=text(b.get('requestId'),80);reference=text(b.get('reference'),100)
+                previous=next((p for p in rows('vendor_payments',eid,c) if p.get('requestId')==request_id),None)
+                if previous:
+                    if previous['vendorId']!=v['id'] or previous['amount']!=value or previous['reference']!=reference or previous['method']!=b.get('method'):raise HTTPError(409,'Payment request already used.')
+                    return self.response(200,{'ok':True,'id':previous['id'],'replayed':True})
+            if value<=0 or value>round(v['quote']-v['paid'],2):raise HTTPError(400,'Enter a positive amount no greater than the vendor balance.')
+            if path=='/api/vendor-payments/prepare':
+                details=v.get('paymentDetails',{});upi=guest_planning.vendor_details(details)['upiId']
+                if not upi:raise HTTPError(409,'Add the vendor UPI payment details first. Razorpay vendor transfers are not connected yet.')
+                uri='upi://pay?'+urlencode({'pa':upi,'pn':details.get('payeeName') or v['name'],'am':f'{value:.2f}','cu':'INR','tn':'Wedding vendor payment'})
+                return self.response(200,{'uri':uri,'amount':value,'payee':details.get('payeeName') or v['name'],'demo':demo_mode()})
+            if path!='/api/vendor-payments/record':raise HTTPError(404,'Not found')
+            reference=text(b.get('reference'),100);request_id=text(b.get('requestId'),80)
+            if any(p.get('reference')==reference and p.get('vendorId')==v['id'] for p in rows('vendor_payments',eid,c)):raise HTTPError(409,'This payment reference has already been recorded.')
+            if b.get('confirmed') is not True:raise HTTPError(400,'Confirm that the payment has completed.')
+            method=b.get('method')
+            if method not in ['UPI','Bank transfer','Cash','Other']:raise ValueError('Payment method')
+            pid=insert(c,'vendor_payments',{'vendorId':v['id'],'vendorName':v['name'],'amount':value,'reference':reference,'method':method,'status':'Recorded manually','actor':self.s['name'],'created':time.time(),'requestId':request_id},eid)
+            v['paid']=round(v['paid']+value,2);update(c,'vendors',v,eid);audit(c,self.s,'Recorded vendor payment #'+str(pid)+' (manual confirmation)')
+        return self.response(200,{'ok':True,'id':pid})
     def entry_pass(self,q):
         self.require_role('Super Organiser','Co-Organiser','Guest');eid=self.s['event_id']
         with conn(True) as c:

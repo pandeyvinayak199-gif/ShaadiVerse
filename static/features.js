@@ -12,7 +12,7 @@ refresh=async function({throwOnError=false}={}){
   state=await api('state');
   const role=state.user.role;
   if(!state.event.length){accountHome();return state}
-  const pages={Guest:['Passport','Timeline','Celebrations','Memories'],Vendor:['Vendors','Timeline'],'Hotel Partner':['Travel & stay','Timeline'],'Finance Team':['Expenses','Timeline']};
+  const pages={Guest:['Passport','Timeline','Celebrations','Memories'],Vendor:['Vendors','Timeline'],'Hotel Partner':['Travel & stay','Timeline'],'Finance Team':['Expenses','Vendors','Timeline']};
   if(pages[role]&&!pages[role].includes(page))page=pages[role][0];
   if(role==='Super Organiser'&&['Passport'].includes(page))page='Overview';
   render();return state;
@@ -37,7 +37,7 @@ render=function(){
  switcher.querySelector('.avatar').textContent=e.name.split(/[&\s]+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('');switcher.querySelector(':scope > div > div').textContent=new Date(e.date+'T12:00:00').toLocaleDateString('en-IN',{month:'short',year:'numeric'}).toUpperCase();
  $('.footer span:last-child').textContent=state.mode==='sandbox'?'SANDBOX · SAMPLE DATA':'YOUR CELEBRATION';
  if(state.user.role==='Co-Organiser'&&!bootstrap.demoMode){
-  const needed={Guests:'guests',Vendors:'vendors',Tasks:'tasks','Travel & stay':'hotels',Catering:'catering','Gifts & shagun':'gifts',Settings:'joins'};
+  const needed={Guests:'guests',Vendors:'vendors',Tasks:'tasks','Travel & stay':'hotels',Catering:'catering','Gifts & shagun':'gifts'};
   document.querySelectorAll('.sidebar .nav').forEach(n=>{let label=n.querySelectorAll('span')[1]?.textContent;if(needed[label]&&!state.user.permissions.includes(needed[label]))n.remove()});
  }
  if(['Super Organiser','Co-Organiser'].includes(state.user.role)&&(bootstrap.demoMode||state.user.role==='Super Organiser'||state.user.permissions.includes('entries'))){

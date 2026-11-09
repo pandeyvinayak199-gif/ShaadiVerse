@@ -34,7 +34,7 @@ class AppTests(unittest.TestCase):
  def test_auth_required(self):self.assertEqual(self.req('state')[0],401)
  def test_guest_privacy_and_write_rejection(self):
   cookie=self.login('Guest');code,data,_=self.req('state',cookie=cookie)
-  self.assertEqual(code,200);self.assertNotIn('expenses',data);self.assertNotIn('budget',data['event'][0]);self.assertEqual(len(data['guests']),1);self.assertNotIn('hotels',data);self.assertEqual({t['name'] for t in data['timeline']},{'Wedding','Sangeet'})
+  self.assertEqual(code,200);self.assertNotIn('expenses',data);self.assertNotIn('budget',data['event'][0]);self.assertEqual(len(data['guests']),1);self.assertNotIn('hotels',data);self.assertEqual({t['name'] for t in data['timeline']},{'Mehendi','Haldi','Sangeet','Wedding','Reception'})
   self.assertEqual(self.req('save',{'kind':'guests','item':{'name':'Intruder'}},cookie)[0],403)
  def test_vendor_scope(self):
   _,data,_=self.req('state',cookie=self.login('Vendor'));self.assertEqual(len(data['vendors']),1);self.assertNotIn('guests',data);self.assertNotIn('expenses',data)

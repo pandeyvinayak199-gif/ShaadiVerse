@@ -129,3 +129,7 @@ In Celebrations, organisers and guests can add a song name, optional artist and 
 ### Help box
 
 The floating **✧ Help** button provides built-in app guidance for guests and organisers. Optional live AI can be enabled with a server-side OpenAI key; see [AI help setup](docs/AI-HELP.md).
+
+### Family RSVPs and vendor payments
+
+Guests can RSVP per function and share family, dietary and accommodation requests. Organisers manage guest limits in Settings, and authorised staff have a vendor payment panel with UPI handoff and manual transaction records. See [guest planning and payment notes](docs/GUEST-PLANNING.md), including the deferred Razorpay transfer setup.
