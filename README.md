@@ -1,8 +1,8 @@
 # ShaadiVerse
 
-A mobile-first wedding planner that starts with your own wedding. New users verify their phone, create a wedding, and add their guests, functions, budgets, vendors, hotels, transport, catering, songs and memories from scratch. There are no sample weddings, role-switching demos, pilot surveys or presentation prompts in the user app.
+A mobile-first wedding planner that starts with your own wedding. New users sign in with Google, create a wedding, and add their guests, functions, budgets, vendors, hotels, transport, catering, songs and memories from scratch. There are no sample weddings, role-switching demos, pilot surveys or presentation prompts in the user app.
 
-Short, contextual guidance can be dismissed with one tap, turned off, and reopened from Settings or the planning guide. The installed phone experience uses the same verified account and saved wedding data as the website.
+Short, contextual guidance can be dismissed with one tap, turned off, and reopened from Settings or the planning guide. The installed phone experience uses the same Google account and saved wedding data as the website.
 
 ## Run and deploy
 
@@ -15,7 +15,7 @@ APP_MODE=user python server.py
 
 Open port 3000. The server reads process environment variables; `.env.example` documents them and is not loaded automatically. Configure credentials in hosting settings, never in Git or chat.
 
-Before opening sign-ups, configure Twilio Verify: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_VERIFY_SERVICE_SID`. The user chose phone OTP sign-in. No email/password accounts or displayed OTP fallback are added. Missing SMS configuration keeps sign-in unavailable, rather than granting unverified access. Use provider test accounts and an authorised real-device check before launch; automated tests mock SMS and send no real messages.
+Before opening sign-ups, enable Google in Supabase and configure the app's Supabase Auth URL and publishable key. See [your exact Google/Supabase/Render setup steps](docs/GOOGLE_SIGN_IN.md). Google replaces phone OTP in the user interface, so no SMS provider is required. Automated tests mock Google provider responses; the real Google consent flow still needs the external console settings and a real test-user sign-in.
 
 Set `COOKIE_SECURE=1`, `TRUST_PROXY=1` behind Render's trusted proxy, and `PUBLIC_BASE_URL` to the HTTPS app URL. Set `DATABASE_URL` securely in Render to the existing Supabase PostgreSQL connection. See [Supabase connection instructions](docs/CONNECT_SUPABASE.md). The root Render blueprint runs the real-user app; the existing service can use Manual Deploy → Deploy latest commit.
 
@@ -44,7 +44,7 @@ SQLite backups use the online backup API and refuse overwrites. For PostgreSQL u
 - [Install on a phone](docs/INSTALL_ON_PHONE.md)
 - [Help box and optional live AI setup](docs/AI-HELP.md)
 
-Owners invite co-organisers and finance members with event-scoped permissions. Guests see their own family and song requests, the full function schedule, and public choices for booked hotels. Co-organisers set guest and room-request limits according to their permissions. Signed QR entry is validated by the server; offline scans remain pending until synchronised.
+Owners invite co-organisers and finance members with event-scoped permissions. Guests sign in using their invited Google email and see their own family and song requests, the full function schedule, and public choices for booked hotels. Co-organisers set guest and room-request limits according to their permissions. Signed QR entry is validated by the server; offline scans remain pending until synchronised.
 
 Optional WhatsApp and Razorpay settings are listed in `.env.example`. Invitation dispatch requires opted-in guests and an approved WhatsApp template. Vendor payment preparation uses a UPI handoff and separate, clearly labelled manual transaction recording. Razorpay vendor transfers remain deferred and require an appropriate Route/payout integration; ordinary Checkout keys alone do not pay vendors. No automated external messages or charges are triggered by deployment.
 
@@ -54,4 +54,16 @@ Optional WhatsApp and Razorpay settings are listed in `.env.example`. Invitation
 PYTHONPATH=. python -m unittest discover -s tests -q
 ```
 
-Tests use isolated databases and explicit test fixtures. Production first-run tests verify blank accounts, no sample records, SMS enforcement and safe cleanup. Optional PostgreSQL tests require an explicitly supplied disposable `TEST_DATABASE_URL`; they create and drop only randomly named test databases. Browser tests include a full first-use flow in `tests/browser-fresh-start.cjs`, using an isolated app whose SMS adapter is mocked. Old presentation-only browser scripts are retired and do not describe the user app.
+Tests use isolated databases and explicit test fixtures. Production first-run tests verify blank accounts, no sample records, Google identity enforcement (and optional legacy phone compatibility) and safe cleanup. Optional PostgreSQL tests require an explicitly supplied disposable `TEST_DATABASE_URL`; they create and drop only randomly named test databases. Browser tests include a full first-use flow in `tests/browser-fresh-start.cjs`, using an isolated app whose SMS adapter is mocked. Old presentation-only browser scripts are retired and do not describe the user app.
+
+### Google sign-in browser check
+
+For a local test that sends no SMS and uses no real Google account:
+
+```sh
+python tests/serve_google_fixture.py --allow-mocked-auth
+# In a second terminal:
+node tests/browser-google-auth.cjs
+```
+
+This fixture binds localhost, uses a fresh temporary SQLite database and mocks only provider responses. Never deploy the fixture script. The production server always verifies Google sign-in with Supabase over HTTPS. A real Google test-user consent check remains necessary after configuring the external accounts.

@@ -4,7 +4,7 @@ from test_workflows import WorkflowCase
 import server
 class FreshStart(WorkflowCase):
  def setUp(self):
-  super().setUp();self.production=patch.dict(os.environ,{'APP_MODE':'user','DEMO_MODE':'1','ALLOW_SANDBOX_OTP':'1','DEMO_ACCESS_PASSWORD':'obsolete-password'});self.production.start();server.initialize()
+  super().setUp();self.production=patch.dict(os.environ,{'APP_MODE':'user','AUTH_PROVIDER':'phone','DEMO_MODE':'1','ALLOW_SANDBOX_OTP':'1','DEMO_ACCESS_PASSWORD':'obsolete-password'});self.production.start();server.initialize()
   self.sms_ready=patch('providers.sms_ready',return_value=True);self.sms_send=patch('providers.sms_send',return_value={'status':'pending'});self.sms_check=patch('providers.sms_check',side_effect=lambda phone,code:code=='123456')
   for mock in [self.sms_ready,self.sms_send,self.sms_check]:mock.start()
  def tearDown(self):

@@ -6,7 +6,7 @@ async function openHelp(){
  function message(label,body){const item=document.createElement('p'),strong=document.createElement('strong'),text=document.createElement('span');strong.textContent=label+': ';text.textContent=body;item.append(strong,text);messages.append(item);messages.scrollTop=messages.scrollHeight}
  try{const status=await api('help/status');mode.textContent=status.aiConfigured?'Live AI help · Answers can be mistaken.':'Built-in help · Live AI has not been connected yet.'}catch{mode.textContent='Help is temporarily unavailable. Please retry.'}
  form.actionHandler=async values=>{
-  if(!state.user){message('Help','Please sign in with your phone first, then ask your question.');return}
+  if(!state.user){message('Help','Please sign in with Google first, then ask your question.');return}
   const text=values.question.trim();if(!text)return;
   const buttons=Array.from($('#modal').querySelectorAll('button'));buttons.forEach(b=>b.disabled=true);question.disabled=true;form.setAttribute('aria-busy','true');message('You',text);mode.textContent='Finding an answer…';
   try{const response=await api('help',{question:text});message('Help',response.answer);mode.textContent=response.notice||(response.mode==='ai'?'AI answer · Check important details with your organiser.':'Built-in help · Live AI has not been connected yet.');question.value=''}catch(e){message('Help',e.message);mode.textContent='Could not answer. Please retry.'}finally{buttons.forEach(b=>b.disabled=false);question.disabled=false;form.removeAttribute('aria-busy');if(question.isConnected)question.focus()}

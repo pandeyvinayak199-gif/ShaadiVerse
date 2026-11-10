@@ -20,5 +20,13 @@ services:
         value: "0"
       - key: APP_MODE
         value: user
+      - key: AUTH_PROVIDER
+        value: google
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
       - key: DATABASE_PATH
         value: /tmp/shaadi.sqlite3

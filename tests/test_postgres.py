@@ -102,3 +102,14 @@ class PostgreSQLRelease(WorkflowCase):
    with server.conn() as c:
     self.assertEqual(len(server.rows('event',real_id,c)),1);self.assertEqual(server.rows('event',sample_id,c),[])
     self.assertEqual(c.execute('SELECT count(*) AS n FROM song_audio WHERE event_id=?',(sample_id,)).fetchone()['n'],0);self.assertEqual(c.execute('SELECT count(*) AS n FROM memory_albums WHERE event_id=?',(sample_id,)).fetchone()['n'],0)
+ def test_google_oauth_and_verified_email_permissions_persist(self):
+  import urllib.request
+  from test_google_auth import GoogleSignIn,NoRedirect
+  self.start();self.opener=urllib.request.build_opener(NoRedirect());self.get=lambda path,cookie=None:GoogleSignIn.get(self,path,cookie);self.profile=lambda address,subject:GoogleSignIn.profile(self,address,subject)
+  with patch.dict(os.environ,{'APP_MODE':'user','AUTH_PROVIDER':'google','SUPABASE_URL':'https://example.supabase.co','SUPABASE_PUBLISHABLE_KEY':'public-fixture','PUBLIC_BASE_URL':self.url}):
+   server.initialize();owner,state=GoogleSignIn.sign_in(self);self.assertTrue(state['user']['google']);eid=self.event(owner)
+   self.assertEqual(self.req('save',{'kind':'members','item':{'name':'Planner','email':'planner@example.com','role':'Co-Organiser','permissions':['timeline']}},owner)[0],200)
+   planner,state=GoogleSignIn.sign_in(self,'planner@example.com','33333333-3333-4333-8333-333333333333');self.assertEqual(state['user']['role'],'Co-Organiser');server.initialize();self.assertEqual(self.req('state',cookie=planner)[1]['user']['role'],'Co-Organiser')
+   with server.conn() as c:
+    self.assertEqual(c.execute('SELECT count(*) AS n FROM oauth_attempts').fetchone()['n'],0)
+    for table in ['auth_accounts','oauth_attempts']:self.assertTrue(c.execute('SELECT relrowsecurity FROM pg_class WHERE oid=?::regclass',('shaadi_sync.'+table,)).fetchone()['relrowsecurity'])
