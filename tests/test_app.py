@@ -5,7 +5,7 @@ import base64
 class AppTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
-  cls.demo=patch.dict(os.environ,{'DEMO_MODE':'1','ALLOW_SANDBOX_OTP':'1','DATABASE_URL':''});cls.demo.start();cls.temp=tempfile.TemporaryDirectory();server.DB=os.path.join(cls.temp.name,'test.sqlite3');server.initialize()
+  cls.demo=patch.dict(os.environ,{'APP_MODE':'test','DEMO_MODE':'1','ALLOW_SANDBOX_OTP':'1','DEMO_ACCESS_PASSWORD':'','DATABASE_URL':''});cls.demo.start();cls.temp=tempfile.TemporaryDirectory();server.DB=os.path.join(cls.temp.name,'test.sqlite3');server.initialize()
   cls.http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler);cls.base='http://127.0.0.1:'+str(cls.http.server_port)
   threading.Thread(target=cls.http.serve_forever,daemon=True).start()
  @classmethod

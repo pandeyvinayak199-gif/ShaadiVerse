@@ -1,9 +1,10 @@
+const {startSample,switchSampleRole}=require('./browser-fixtures.cjs');
 const { chromium }=require('playwright');
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']});
  const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const base=process.env.APP_URL||'http://127.0.0.1:3001';await page.goto(base);
- await page.getByRole('button',{name:'Explore Rahul & Priya’s wedding'}).click();await page.getByRole('heading',{name:'A beautiful celebration awaits.'}).waitFor();
+ await startSample(page);await page.getByRole('heading',{name:'Your wedding, coming together.'}).waitFor();
  // Generate an actual pass and decode its SVG pixels using the vendored camera decoder.
  const qr=await page.evaluate(async()=>{
   const state=await api('state'),g=state.guests.find(g=>g.status==='Confirmed'),p=await api('pass?guestId='+g.id);

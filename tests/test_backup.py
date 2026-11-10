@@ -4,7 +4,7 @@ import server, manage
 class BackupTests(unittest.TestCase):
  def test_consistent_backup_and_no_overwrite(self):
   old=server.DB
-  with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{'DATABASE_URL':'','DEMO_MODE':'1'}):
+  with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{'DATABASE_URL':'','APP_MODE':'test','DEMO_MODE':'1'}):
    try:
     server.DB=d+'/source.sqlite3';server.initialize()
     with contextlib.redirect_stdout(io.StringIO()):manage.backup(d+'/backup.sqlite3')

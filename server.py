@@ -16,7 +16,7 @@ ALLOWED=['guests','timeline','vendors','tasks','hotels','transport','catering','
 CATALOG={'Event Pass':299900}  # INR paise, controlled by the server
 
 def sandbox_otp():return demo_mode() and os.environ.get('ALLOW_SANDBOX_OTP','0')=='1'
-def demo_mode():return os.environ.get('DEMO_MODE','0')=='1'
+def demo_mode():return os.environ.get('APP_MODE','user')=='test' and os.environ.get('DEMO_MODE','0')=='1'
 def conn(write=False):return storage.connect(DB,write)
 def rows(kind,event_id=1,c=None):
     if c is None:
@@ -51,6 +51,18 @@ def initialize():
                     if kind=='event':item['demoWorkspace']='legacy-demo'
                     record_id=insert(c,kind,item,1)
                     if kind=='event':c.execute('INSERT INTO event_codes VALUES(?,?)',(item['code'],1))
+        if not demo_mode():remove_sample_workspaces(c)
+def remove_sample_workspaces(c):
+    # Only explicit sample markers are eligible; real weddings are never matched by name.
+    ids=[r['event_id'] for r in c.execute("SELECT event_id,data FROM records WHERE kind='event'") if json.loads(r['data']).get('demoWorkspace')]
+    for eid in ids:
+        for album in c.execute('SELECT id FROM memory_albums WHERE event_id=?',(eid,)).fetchall():
+            c.execute('DELETE FROM memory_photos WHERE album_id=?',(album['id'],));c.execute('DELETE FROM memory_visitors WHERE album_id=?',(album['id'],))
+        for table in ['memory_albums','song_audio','sessions','memberships','event_codes','outbox','purchases','feedback','audit','records']:
+            c.execute('DELETE FROM '+table+' WHERE event_id=?',(eid,))
+    c.execute("DELETE FROM sessions WHERE auth_mode<>'verified' OR demo_role IS NOT NULL")
+    c.execute("DELETE FROM challenges WHERE mode='sandbox'")
+
 def owns_guest(g,s):return g['id']==s.get('entity_id') if s.get('demo_role')=='Guest' else g.get('phone')==s['phone']
 def hash_token(t):return hashlib.sha256(t.encode()).hexdigest()
 def phone_number(raw):
@@ -150,7 +162,7 @@ class Handler(SimpleHTTPRequestHandler):
         if cookie:self.send_header('Set-Cookie',cookie)
         self.end_headers();self.wfile.write(b)
     def require_access(self):
-        password=os.environ.get('DEMO_ACCESS_PASSWORD','')
+        password=os.environ.get('DEMO_ACCESS_PASSWORD','') if demo_mode() else ''
         if urlparse(self.path).path.startswith('/api/memories/') or urlparse(self.path).path in ['/memories','/memory-client.js','/memory-style.css']:return True
         if urlparse(self.path).path in ['/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png','/icons/maskable-512.png','/icons/apple-touch-icon.png']:return True
         if not password or urlparse(self.path).path in ['/api/health','/api/webhooks/razorpay','/api/webhooks/whatsapp']:return True
@@ -190,7 +202,7 @@ class Handler(SimpleHTTPRequestHandler):
             if path=='/api/help/status':return self.response(200,{'aiConfigured':help_assistant.ready()})
             if path.startswith('/api/song-audio/'):return self.song_audio_get(path,query)
             if path=='/api/health':return self.response(200,{'ok':True})
-            if path=='/api/bootstrap':return self.response(200,{'demoMode':demo_mode(),'smsReady':providers.sms_ready(),'whatsappReady':providers.whatsapp_ready(),'paymentsReady':providers.payments_ready(),'databaseConfigured':bool(os.environ.get('DATABASE_URL')),'release':'investor-pilot','version':'1.0','sandboxOtpAvailable':sandbox_otp()})
+            if path=='/api/bootstrap':return self.response(200,{'demoMode':demo_mode(),'smsReady':providers.sms_ready(),'whatsappReady':providers.whatsapp_ready(),'paymentsReady':providers.payments_ready(),'databaseConfigured':bool(os.environ.get('DATABASE_URL')),'release':'wedding-app','version':'1.0','sandboxOtpAvailable':sandbox_otp()})
             if path=='/api/webhooks/whatsapp':
                 token=os.environ.get('WHATSAPP_VERIFY_TOKEN','')
                 if not token or query.get('hub.mode')!=['subscribe'] or not hmac.compare_digest(query.get('hub.verify_token',[''])[0],token):raise HTTPError(403,'Invalid verification token')
@@ -299,7 +311,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.s:raise HTTPError(401,'Please sign in')
         s=self.s;eid=s['event_id'];role=s['role']
         user={k:s.get(k) for k in ['name','phone','role','event_id','permissions']};user['demo']=bool(s['demo_role'])
-        data={'user':user,'events':self.events(c),'csrf':s['csrf'],'mode':'sandbox' if demo_mode() else 'live','services':{'sms':providers.sms_ready(),'whatsapp':providers.whatsapp_ready(),'payments':providers.payments_ready()},'event':[],'scope':hash_token(str(eid)+':'+s['phone']),'release':'investor-pilot'}
+        data={'user':user,'events':self.events(c),'csrf':s['csrf'],'mode':'sandbox' if demo_mode() else 'live','services':{'sms':providers.sms_ready(),'whatsapp':providers.whatsapp_ready(),'payments':providers.payments_ready()},'event':[],'scope':hash_token(str(eid)+':'+s['phone']),'release':'wedding-app'}
         if not eid:return data
         kinds=['event','timeline','announcements','polls']
         if role=='Super Organiser':kinds+=ALLOWED+['joins','entries','members','expenses']
@@ -366,7 +378,9 @@ class Handler(SimpleHTTPRequestHandler):
             self.require_role('Super Organiser')
             if not self.s['demo_role']:raise HTTPError(403,'Only a demonstration workspace can be reset.')
             return self.login_session('', 'Priya Sharma','Super Organiser',reset_demo=True)
-        if path=='/api/feedback':return self.submit_feedback(b)
+        if path=='/api/feedback':
+            if not demo_mode():raise HTTPError(404,'Not found')
+            return self.submit_feedback(b)
         if path=='/api/auth/otp':
             if demo_mode() and not sandbox_otp():raise HTTPError(403,'Phone sign-in is deferred. Explore an isolated demo workspace instead.')
             phone=phone_number(b.get('phone'));now=time.time()
@@ -481,14 +495,14 @@ class Handler(SimpleHTTPRequestHandler):
         if self.s['demo_role']:self.require_role('Super Organiser')
         name=text(b.get('name'),80);day=text(b.get('date'));date.fromisoformat(day)
         code=re.sub('[^A-Z0-9]+','-',name.upper()).strip('-')[:35]+'-'+day[:4]+'-'+secrets.token_hex(4).upper()
-        e={'name':name,'date':day,'venue':text(b.get('venue'),150),'code':code,'budget':amount(b.get('budget',0)),'approvalThreshold':100000,'theme':b.get('theme','Royal Rajasthani'),'hashtag':'#'+re.sub('[^a-zA-Z0-9]','',name),'plan':'Free'}
+        e={'name':name,'date':day,'venue':guest_planning.string(b.get('venue',''),150),'code':code,'budget':amount(b.get('budget',0)),'approvalThreshold':100000,'theme':b.get('theme') or 'Modern Minimal','hashtag':guest_planning.string(b.get('hashtag',''),100),'plan':'Free' if os.environ.get('APP_MODE')=='test' else 'Wedding'}
         if self.s['demo_role']:e.update(demoWorkspace=self.s['phone'],demoCreated=time.time(),plan='Event Pass')
         with conn(True) as c:
             limit(c,'create-event:'+self.s['phone'],10,86400)
             eid=insert(c,'event',e,0);c.execute('INSERT INTO event_codes VALUES(?,?)',(code,eid));c.execute('UPDATE records SET event_id=? WHERE id=?',(eid,eid))
             c.execute('INSERT INTO memberships(event_id,phone,role,permissions) VALUES(?,?,?,?)',(eid,self.s['phone'],'Super Organiser','[]'))
             c.execute('UPDATE sessions SET event_id=? WHERE token_hash=?',(eid,self.s['token_hash']))
-            insert(c,'timeline',{'name':'Wedding','date':day,'time':'18:30','venue':e['venue'],'dress':'Celebrate in your own style'},eid)
+            if os.environ.get('APP_MODE')=='test':insert(c,'timeline',{'name':'Wedding','date':day,'time':'18:30','venue':e['venue'],'dress':'Celebrate in your own style'},eid)
             audit(c,{**self.s,'event_id':eid},'Created event')
         return self.response(201,{'ok':True,'eventId':eid,'code':code})
     def join(self,b):

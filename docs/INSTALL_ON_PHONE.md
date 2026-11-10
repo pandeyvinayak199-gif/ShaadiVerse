@@ -25,6 +25,6 @@ You may need to enter the existing private-demo credentials again (`demo` and th
 
 ## Connectivity
 
-Sign-in, loading current event data, saving changes and submitting pilot feedback need Internet. Once an organiser has opened the gate online, its offline shell can reopen and queue scans. Queued scans are pending until server verification; the installed app does not approve admission while disconnected. The service worker does not cache guest/API/pass responses. If there is no saved gate session, an offline launch shows a reconnect screen.
+Sign-in, loading current event data, saving changes and saving updates need Internet. Once an organiser has opened the gate online, its offline shell can reopen and queue scans. Queued scans are pending until server verification; the installed app does not approve admission while disconnected. The service worker does not cache guest/API/pass responses. If there is no saved gate session, an offline launch shows a reconnect screen.
 
 The full-screen window and final home-screen installation should be checked on your actual device. Browser validation confirms the manifest, icon dimensions, service worker, Android prompt handling, iPhone guidance, phone layout, offline launch, and cache exclusions; it does not emulate tapping an OS installation confirmation on real hardware.

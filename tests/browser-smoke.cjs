@@ -1,3 +1,4 @@
+const {startSample,switchSampleRole}=require('./browser-fixtures.cjs');
 // Optional: npm-installed Playwright and system Chromium are required.
 const { chromium } = require('playwright');
 (async () => {
@@ -5,8 +6,8 @@ const { chromium } = require('playwright');
  const page = await browser.newPage({viewport:{width:1440,height:1100},reducedMotion:'reduce'});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(process.env.APP_URL || 'http://127.0.0.1:3000');
- await page.getByRole('button',{name:'Explore Rahul & Priya’s wedding'}).click();
- await page.getByRole('heading',{name:'A beautiful celebration awaits.'}).waitFor();
+ await startSample(page);
+ await page.getByRole('heading',{name:'Your wedding, coming together.'}).waitFor();
  for (const [nav,title] of [['Guests','Your favourite people, all in one place.'],['Timeline','Every moment has its moment.'],['Vendors','The magic makers.'],['Expenses','Big dreams. Thoughtful budgets.'],['Travel & stay','A warm welcome, before the wedding.'],['Catering','Love, laughter & a second helping.'],['Tasks','A little teamwork. A lot of magic.'],['Celebrations','A little extra shaadi magic.'],['Gifts & shagun','Little gestures. Lasting gratitude.'],['Settings','Make this celebration yours.']]) {
   await page.locator('.sidebar .nav').filter({hasText:nav}).click();
   await page.getByRole('heading',{name:title,exact:true}).waitFor();

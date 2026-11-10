@@ -1,8 +1,8 @@
-# Investor/pilot demo. Set DATABASE_URL in Render to use Supabase permanently.
+# Fresh-start wedding app. Set DATABASE_URL and Twilio Verify credentials in Render.
 # Without DATABASE_URL, the local fallback is ephemeral.
 services:
   - type: web
-    name: shaadi-sync-demo
+    name: shaadiverse
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
@@ -18,9 +18,7 @@ services:
         value: "1"
       - key: ALLOW_SANDBOX_OTP
         value: "0"
-      - key: DEMO_MODE
-        value: "1"
+      - key: APP_MODE
+        value: user
       - key: DATABASE_PATH
-        value: /tmp/shaadi-demo.sqlite3
-      - key: DEMO_ACCESS_PASSWORD
-        generateValue: true
+        value: /tmp/shaadi.sqlite3

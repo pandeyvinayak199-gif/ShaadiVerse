@@ -1,139 +1,57 @@
-# ShaadiVerse · Investor & Pilot Edition 1.0
+# ShaadiVerse
 
-The current release is an isolated, sample-data investor demonstration with a guided walkthrough, role switching, reset, consent-based pilot survey, and connect-later checklists. SMS, WhatsApp and payments are deferred.
+A mobile-first wedding planner that starts with your own wedding. New users verify their phone, create a wedding, and add their guests, functions, budgets, vendors, hotels, transport, catering, songs and memories from scratch. There are no sample weddings, role-switching demos, pilot surveys or presentation prompts in the user app.
 
-- **Connect your existing Supabase project to Render:** [step-by-step guide](docs/CONNECT_SUPABASE.md). A ChatGPT plugin connection alone does not connect hosting.
-- **Present and run a pilot survey:** [five-minute demo guide](docs/INVESTOR_DEMO.md).
-- **Optional new-service blueprint:** [Render + existing Supabase](deploy/render-supabase-demo.yaml). This provisions no paid database.
+Short, contextual guidance can be dismissed with one tap, turned off, and reopened from Settings or the planning guide. The installed phone experience uses the same verified account and saved wedding data as the website.
 
-
-A mobile-first wedding planner with event-isolated accounts, guest RSVP, a timeline, vendors, expenses, signed QR entry, team permissions, and live-service adapters. The existing hosted free demo remains a sandbox.
-
-## Run locally
+## Run and deploy
 
 Python 3.12+:
 
 ```sh
 python -m pip install -r requirements.txt
-DEMO_MODE=1 python server.py
+APP_MODE=user python server.py
 ```
 
-Open the server on port **3000**. `DEMO_MODE=1` seeds Rahul & Priya only when the database is empty and explicitly enables sample-role sign-in and visible sandbox OTPs. Each browser visitor gets a separate sample wedding. Switch roles within that workspace and create additional fictional events from the event switcher. Public demo phone sign-in is disabled. Developers may explicitly set `ALLOW_SANDBOX_OTP=1` only for isolated authentication testing; **never treat that OTP as verified phone ownership.**
+Open port 3000. The server reads process environment variables; `.env.example` documents them and is not loaded automatically. Configure credentials in hosting settings, never in Git or chat.
 
-For verified-user mode, use `DEMO_MODE=0` (the default), configure Twilio Verify, and use persistent storage. Live mode disables demo roles, does not return OTPs, and rejects sessions issued in sandbox mode. App tables use the private `shaadi_sync` PostgreSQL schema with RLS and anonymous access revoked; recognised legacy app tables are migrated transactionally. No database password or provider key is exposed by the connection checklist. The server reads process variables; `.env.example` documents names but is not automatically loaded. Enter credentials in hosting settings, never in Git or chat.
+Before opening sign-ups, configure Twilio Verify: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_VERIFY_SERVICE_SID`. The user chose phone OTP sign-in. No email/password accounts or displayed OTP fallback are added. Missing SMS configuration keeps sign-in unavailable, rather than granting unverified access. Use provider test accounts and an authorised real-device check before launch; automated tests mock SMS and send no real messages.
 
-## What is now implemented
+Set `COOKIE_SECURE=1`, `TRUST_PROXY=1` behind Render's trusted proxy, and `PUBLIC_BASE_URL` to the HTTPS app URL. Set `DATABASE_URL` securely in Render to the existing Supabase PostgreSQL connection. See [Supabase connection instructions](docs/CONNECT_SUPABASE.md). The root Render blueprint runs the real-user app; the existing service can use Manual Deploy → Deploy latest commit.
 
-- **Storage:** additive migration of the existing SQLite data; WAL and transactional writes; durable hashed sessions, expiring OTP challenges, attempt limits, account and event memberships, audit records, payment orders and a message outbox. SQLite can use a mounted disk; `DATABASE_URL` selects PostgreSQL. PostgreSQL transactions and row locks protect admission and finance limits.
-- **Accounts:** real Twilio Verify adapter, India +91 mobile normalization, single-use verification, resend/attempt limits, 24-hour sessions, logout invalidation, HttpOnly/SameSite cookies, production Secure-cookie setting, JSON/Origin/CSRF checks. Render blueprints enable trusted-proxy client identification for IP limits; leave `TRUST_PROXY=0` for direct local access. No caller-selected role in live mode.
-- **Events:** verified users create events, switch among their own memberships, share real invitation URLs, regenerate codes, approve join requests and revoke access. Codes never reveal guest records. Staff permissions are assigned by the organiser; finance is capped at five members. Vendor/hotel accounts are bound to one linked entity. Pre-registered guests join only after verifying their own phone.
-- **QR:** signed, unguessable, revocable passes rendered by a pinned QR library; guest-private QR download; camera decoding with bundled MIT-licensed jsQR; transactional duplicate and plus-one checks; staff logs and request idempotency. Offline scans are **pending**, not approvals, until the server confirms them. The service worker caches the application shell, not guest/API/pass responses. Pending scans are scoped to the current account/event and cleared on logout.
-- **WhatsApp:** consent-gated invitation-template queue, explicit user-triggered dispatch, delivery webhooks, signed/context-bound Yes/No/Maybe RSVP callbacks, failure review and webhook replay protection. Sandbox mode sends nothing.
-- **Payments:** server-priced Razorpay Event Pass checkout (₹2,999 per event), order records, checkout signature and captured-payment validation, signed webhooks, idempotent activation, a payment receipt, and Free-plan limits. A Free event supports 50 guests, invitations, RSVP and timeline; vendor/expense/QR features use Event Pass. Guests always keep access to their invitation and RSVP. No payments occur in demo mode.
-- Existing dashboard, responsive light/dark UI, themes, countdown, guest CSV, timeline, tasks, travel milestones, catering, gifts, songs and polls remain available.
+`APP_MODE=user` is the default. Legacy `DEMO_MODE`, `ALLOW_SANDBOX_OTP` and `DEMO_ACCESS_PASSWORD` values alone cannot enable samples, unverified sign-in or a demo password gate. Remove obsolete demo variables from hosting settings when convenient. Explicit `APP_MODE=test` is reserved for isolated regression fixtures and must never be used on the live service.
 
-## Keep the free demo
+## Fresh wedding data and migration
 
-The root `render.yaml` still uses a **free** web service. Set `DATABASE_URL` in Render to use your persistent Supabase database; without it, the local fallback is ephemeral. It now installs the QR and PostgreSQL dependencies. It keeps demo mode, password protection and manual deployment, and explicitly disables unverified sandbox phone sign-in. No paid plan is activated by this repository change. The Render-generated `DEMO_ACCESS_PASSWORD` protects the optional demo with username `demo`.
+New weddings contain only the name, date and optional venue, hashtag and budget entered by their organiser. Functions are not pre-created, and guest, hotel, vendor, expense, transport, catering, task, poll, song and memory lists start empty. New personal weddings have the Wedding plan, making the existing planning features available without the old sample-plan checkout. Legacy paid purchases remain unchanged.
 
-To update that demo after code is pushed, use Render’s **Manual Deploy → Deploy latest commit**. The web service may sleep. Without `DATABASE_URL`, local sample edits and survey answers may be lost on restart. With Supabase, the stored data follows that database’s persistence/backup policy. The demo is intended for fictional event data and concept surveys, not production guest identity verification.
+On real-user startup, records marked `demoWorkspace` are removed, together with their sessions, memberships, invitation codes, sample photos, audio and related records. The recognised legacy sample is identified by its original code and lack of real owner membership before marking. Cleanup never matches weddings merely by couple name. Real weddings and their accounts are preserved, even when they share the sample couple's name. Sandbox sessions are invalidated. Back up your database before deployment so the retired sample data can be recovered if you need it.
 
-## Permanent storage: choose later
-
-Both options are prepared; neither was purchased or activated:
-
-1. **Render disk:** `deploy/render-disk.yaml` describes a separate **paid starter** service with a 1 GB disk at `/var/data`. The database is `/var/data/shaadi.sqlite3`; demo mode is off. Import this blueprint only after deliberately choosing the paid service. Disk persistence is separate from backups. Keep one application instance for this SQLite configuration.
-2. **Existing PostgreSQL:** `deploy/render-postgres.yaml` uses a free web service with a database you supply separately through `DATABASE_URL`. It does not buy or create a database. Durability, expiration and backups depend on your chosen provider. Remote connections require `sslmode=verify-full`, using system certificate trust by default; supply the appropriate trusted CA through libpq settings for a private CA. Loopback development databases may omit TLS.
-
-Run `python manage.py check` against the intended configured database before use. SQLite migrations/backups and real local PostgreSQL migrations, private schema/RLS, session/survey restart persistence and concurrent admission are tested. Your actual Supabase connection still requires the secure Render setting; no external Supabase project was accessible in this workspace.
-
-### Preserve data and back up
-
-Existing SQLite records are migrated in place; they are not reset. Legacy demo sessions were memory-only and must sign in again. Legacy seeded data does not grant unverified users organiser access in live mode.
+Use persistent storage: Supabase PostgreSQL or a mounted SQLite volume. A free Render service's local filesystem is temporary and is unsuitable for durable wedding records. Remote PostgreSQL requires verified TLS; use the provider's trusted certificate configuration. Application tables live in the private `shaadi_sync` schema with row-level security and anonymous privileges revoked.
 
 ```sh
+python manage.py check
 DATABASE_PATH=/var/data/shaadi.sqlite3 python manage.py backup /secure/location/shaadi-backup.sqlite3
 ```
 
-This uses SQLite’s online backup API, validates the result and refuses overwrites. Backups contain personal data and signing/session information. Keep them private and copy them outside the service disk. For PostgreSQL, use provider-managed backups or `pg_dump`; the SQLite backup command does not pretend to back up PostgreSQL. To move an existing SQLite application to a disk, back it up first, stop writes, place the intact backup at the new `DATABASE_PATH`, then start and run `manage.py check`. Do not delete the source until independently verified. Importing an existing SQLite dataset into PostgreSQL requires a separate data migration; changing `DATABASE_URL` alone does not copy records.
+SQLite backups use the online backup API and refuse overwrites. For PostgreSQL use provider-managed backups or `pg_dump`, including the `shaadi_sync` schema. Changing `DATABASE_URL` does not copy data between databases.
 
-## Connect real services
+## Features and setup
 
-No live credentials are currently supplied, and provider delivery/capture has not been live-tested. Missing configuration returns an explicit unavailable response; there is no silent mock fallback. Use service test/sandbox accounts first and perform an authorised real-device smoke check before inviting guests.
+- [Guest families, per-function RSVPs, hotel requests and vendor payment records](docs/GUEST-PLANNING.md)
+- [QR-shared Memories albums and private photo storage](docs/MEMORIES.md)
+- [Private song mashup uploads and playback](docs/SONG-MASHUPS.md)
+- [Install on a phone](docs/INSTALL_ON_PHONE.md)
+- [Help box and optional live AI setup](docs/AI-HELP.md)
 
-### Phone OTP: Twilio Verify
+Owners invite co-organisers and finance members with event-scoped permissions. Guests see their own family and song requests, the full function schedule, and public choices for booked hotels. Co-organisers set guest and room-request limits according to their permissions. Signed QR entry is validated by the server; offline scans remain pending until synchronised.
 
-Configure `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`. Enable SMS to India in your Twilio account, including any sender, destination, trial-recipient or regulatory approvals your account requires. Set `DEMO_MODE=0`, `COOKIE_SECURE=1` and `PUBLIC_BASE_URL` to your HTTPS app URL. Sign-in and event creation then use verified phone ownership. Only India (+91) numbers are currently supported.
+Optional WhatsApp and Razorpay settings are listed in `.env.example`. Invitation dispatch requires opted-in guests and an approved WhatsApp template. Vendor payment preparation uses a UPI handoff and separate, clearly labelled manual transaction recording. Razorpay vendor transfers remain deferred and require an appropriate Route/payout integration; ordinary Checkout keys alone do not pay vendors. No automated external messages or charges are triggered by deployment.
 
-### WhatsApp Cloud API
-
-Configure `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TEMPLATE_NAME`, `WHATSAPP_TEMPLATE_LANGUAGE`, `WHATSAPP_APP_SECRET`, and an independently chosen `WHATSAPP_VERIFY_TOKEN`.
-
-Approve a Meta invitation template whose body has exactly three text parameters, in order: **guest name**, **event name**, **event code**. For a template with three quick-reply buttons (Yes, No, Maybe), set `WHATSAPP_RSVP_BUTTONS=1`; the adapter supplies the payloads `RSVP_YES`, `RSVP_NO`, `RSVP_MAYBE`. Configure the webhook as `https://YOUR-APP/api/webhooks/whatsapp`, with the verify token, and subscribe to messages. Callback signatures are checked against the app secret; RSVP replies must reference an outbound provider message and match its recipient.
-
-Guests explicitly opt in during RSVP and can opt out on a subsequent RSVP. Organisers select eligible recipients and queue invitations, then review and explicitly send up to 20 at a time in Settings. Failed or uncertain deliveries need provider-log review; they are not automatically retried. No automated reminder scheduler or arbitrary free-text broadcasts are included in this release. WhatsApp provider charges can apply when you explicitly dispatch.
-
-### Razorpay
-
-Configure `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and a separate `RAZORPAY_WEBHOOK_SECRET`. Start with Razorpay **test mode**. Configure `https://YOUR-APP/api/webhooks/razorpay` for `payment.captured`. Checkout callbacks activate a plan only after fetching and matching a captured payment; signed captured webhooks provide recovery if the browser closes. Editing the event cannot change its paid plan.
-
-₹2,999 is the current server catalog price in `server.py`, in paise. Review your business pricing before connecting live keys. The downloadable document is a **payment receipt**, not a GST tax invoice. Seller GST/billing configuration, Planner Pro recurring subscriptions, refunds/cancellations and marketplace payouts are not implemented. Razorpay/provider account activation and live capture still require account-side setup and testing.
-
-## Validation
+## Verification
 
 ```sh
-python -m unittest discover -s tests -v
-node --check static/app.js
-node --check static/features.js
+PYTHONPATH=. python -m unittest discover -s tests -q
 ```
 
-Integration tests use disposable SQLite databases, explicit sandbox mode or mocked live providers, and no real messages/charges. They exercise data isolation, authentication/CSRF, OTP limits, staff scopes, migration, backups, capacity limits, tampered/revoked QR passes, concurrent duplicates, offline request idempotency, payment amounts/signatures/capture/webhook replay and WhatsApp consent/callbacks.
-
-Optional browser validation (Playwright and Chromium required):
-
-```sh
-# Start an isolated sample instance in a separate terminal:
-DEMO_MODE=1 DATABASE_PATH=/tmp/shaadi-browser.sqlite3 PORT=3001 python server.py
-APP_URL=http://127.0.0.1:3001 node tests/browser-investor.cjs
-APP_URL=http://127.0.0.1:3001 node tests/browser-features.cjs
-```
-
-Use a fresh disposable database for each browser run: the browser tests create sample events, assign a fictional team member, submit a consented survey and check in sample guests. `CHROMIUM_PATH` overrides `/usr/bin/chromium`. This validates actual SVG encoding/decoding, mobile layout, online/duplicate/offline gate states, sync, isolated visitor workspaces, demo event creation and invitations. Camera hardware permissions and real provider delivery still require device/account checks.
-
-## Remaining original-brief work
-
-These five recommended upgrades are implemented in code and need the hosting/provider activation described above. This is still not every feature in the much larger original brief: seating drag-and-drop, ID/contract/receipt uploads, per-guest hotel-room assignments, automatic personal-data deletion, Hindi translations, memory books, invitation animation, planner subscriptions, platform admin and marketplace features remain separate work. Offline scanning intentionally does not claim multi-device admission authority while disconnected.
-
-## Local PostgreSQL validation
-
-The optional `tests/test_postgres.py` creates and drops only randomly named test databases on a disposable PostgreSQL server that you explicitly supply via `TEST_DATABASE_URL`; it requires CREATEDB privileges and must not point at a production service. The normal SQLite suite skips these four tests when no test server is supplied. Actual local PostgreSQL validation covers private-schema/RLS access, preserved legacy tables, survey/session persistence across initialization and concurrent duplicate gate checks. This does not verify the live Supabase account.
-
-## Walkthrough startup checks
-
-The walkthrough waits for the sample dashboard before opening, disables duplicate starts while loading, and leaves a visible retry message if loading fails. All presentation handlers are installed before bootstrap. Dashboard records share one database connection per response, and PostgreSQL sample inserts are batched. To exercise delayed loading and failure recovery, run `APP_URL=http://127.0.0.1:3004 node tests/browser-walkthrough.cjs` against a disposable demo instance.
-
-## Install on Android or iPhone
-
-ShaadiVerse now includes a standalone PWA manifest, 192/512 px and maskable app icons, an Apple home-screen icon, safe-area spacing and an in-app installation entry. Android uses the native browser prompt when available; iPhone users receive Safari Add to Home Screen instructions. See [phone installation](docs/INSTALL_ON_PHONE.md). The browser fallback remains available on desktop.
-
-`node tests/browser-pwa.cjs` checks manifest installability with a disposable normal Chrome profile (Incognito cannot install apps), installation UI, iPhone guidance, offline launch and exclusion of private API responses from the cache. Supply `APP_URL` and optionally `CHROMIUM_PATH`. The native OS installation itself needs a real-device check.
-
-## Spotify song links
-
-In Celebrations, organisers and guests can add a song name, optional artist and optional Spotify track/share link. Saved track links open Spotify in a separate tab/app; requests without a URL receive a Spotify search link, including older song records. Organisers can edit a song’s link later. Guest requests retain Pending status and guests see their own requests. HTTPS Spotify track links, official `spotify.link` shares and track URIs are accepted and normalised; no Spotify API credentials, automatic track matching or embedded playback are used.
-
-## Memories shared photo albums
-
-**Memories → Create our Memories album** gives each event a guest QR/link and a separate private host link. Guests enter a name, upload multiple photos, browse everyone’s photos and download individual images or a selected ZIP. Photos use the existing private database, including Supabase when configured; no new service credentials are needed. JPEG/PNG/WebP/HEIC uploads are validated, optimised for sharing and stripped of original location metadata. Finite storage/file-size limits are explicit. Hosts can pause uploads/access, rotate guest links and remove photos. See the [Memories guide](docs/MEMORIES.md), especially saving the private host link before resetting a demo.
-
-### Help box
-
-The floating **✧ Help** button provides built-in app guidance for guests and organisers. Optional live AI can be enabled with a server-side OpenAI key; see [AI help setup](docs/AI-HELP.md).
-
-### Family RSVPs and vendor payments
-
-Guests can RSVP per function and share family, dietary and accommodation requests. Organisers manage guest limits in Settings, and authorised staff have a vendor payment panel with UPI handoff and manual transaction records. See [guest planning and payment notes](docs/GUEST-PLANNING.md), including the deferred Razorpay transfer setup.
-
-### Song mashups
-
-Guests and co-organisers can attach private audio mashups to song requests, play/download them, and replace or remove uploads. See [song mashup formats, storage and permissions](docs/SONG-MASHUPS.md).
+Tests use isolated databases and explicit test fixtures. Production first-run tests verify blank accounts, no sample records, SMS enforcement and safe cleanup. Optional PostgreSQL tests require an explicitly supplied disposable `TEST_DATABASE_URL`; they create and drop only randomly named test databases. Browser tests include a full first-use flow in `tests/browser-fresh-start.cjs`, using an isolated app whose SMS adapter is mocked. Old presentation-only browser scripts are retired and do not describe the user app.

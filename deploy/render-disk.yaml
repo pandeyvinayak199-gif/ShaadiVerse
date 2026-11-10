@@ -1,5 +1,5 @@
 # OPTIONAL PAID STORAGE. Import only after deliberately choosing a paid Render service.
-# Does not change the existing free demo. Back up any existing database first.
+# Does not modify an existing service. Back up any existing database first.
 services:
   - type: web
     name: shaadi-sync-private
@@ -18,8 +18,8 @@ services:
         value: 3.12.14
       - key: DATABASE_PATH
         value: /var/data/shaadi.sqlite3
-      - key: DEMO_MODE
-        value: "0"
+      - key: APP_MODE
+        value: user
       - key: TRUST_PROXY
         value: "1"
       - key: COOKIE_SECURE

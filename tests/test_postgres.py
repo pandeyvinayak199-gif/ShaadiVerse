@@ -12,7 +12,7 @@ class PostgreSQLRelease(WorkflowCase):
   self.admin_url=os.environ['TEST_DATABASE_URL'];self.database='shaadi_test_'+secrets.token_hex(6)
   with psycopg.connect(self.admin_url,autocommit=True) as c:c.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(self.database)))
   options=conninfo_to_dict(self.admin_url);options['dbname']=self.database;self.url_db=make_conninfo(**options)
-  self.env=patch.dict(os.environ,{'DATABASE_URL':self.url_db,'DEMO_MODE':'1','ALLOW_SANDBOX_OTP':'0','DEMO_ACCESS_PASSWORD':''});self.env.start();self.csrf={};self.http=None
+  self.env=patch.dict(os.environ,{'DATABASE_URL':self.url_db,'APP_MODE':'test','DEMO_MODE':'1','ALLOW_SANDBOX_OTP':'0','DEMO_ACCESS_PASSWORD':''});self.env.start();self.csrf={};self.http=None
  def start(self):
   server.initialize();self.http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler);self.url='http://127.0.0.1:'+str(self.http.server_port);threading.Thread(target=self.http.serve_forever,daemon=True).start()
  def tearDown(self):
@@ -90,3 +90,15 @@ class PostgreSQLRelease(WorkflowCase):
    row=c.execute("SELECT relrowsecurity FROM pg_class WHERE oid='shaadi_sync.song_audio'::regclass").fetchone();self.assertTrue(row['relrowsecurity'])
   other=self.demo();self.assertNotEqual(self.req('state',cookie=owner)[1]['event'][0]['id'],self.req('state',cookie=other)[1]['event'][0]['id'])
   self.assertEqual(self.req('song-audio/remove',{'songId':song['id']},other)[0],404)
+ def test_user_startup_removes_only_marked_sample_files(self):
+  import base64
+  from test_song_audio import audio_bytes
+  self.start();sample=self.demo();state=self.req('state',cookie=sample)[1];sample_id=state['event'][0]['id'];self.req('memories/manage',{'action':'create'},sample)
+  song=self.req('save',{'kind':'songs','item':{'name':'Sample audio'}},sample)[1]['id'];self.assertEqual(self.req('song-audio',{'songId':song,'filename':'sample.wav','data':base64.b64encode(audio_bytes()).decode(),'consent':True},sample)[0],201)
+  with server.conn(True) as c:
+   real={k:v for k,v in state['event'][0].items() if k not in ['id','demoWorkspace','demoCreated']};real['code']='REAL-'+secrets.token_hex(8);real_id=server.insert(c,'event',real,0);c.execute('UPDATE records SET event_id=? WHERE id=?',(real_id,real_id))
+  with patch.dict(os.environ,{'APP_MODE':'user','DEMO_MODE':'1','ALLOW_SANDBOX_OTP':'1'}):
+   server.initialize();self.assertFalse(server.demo_mode());self.assertEqual(self.req('state',cookie=sample)[0],401)
+   with server.conn() as c:
+    self.assertEqual(len(server.rows('event',real_id,c)),1);self.assertEqual(server.rows('event',sample_id,c),[])
+    self.assertEqual(c.execute('SELECT count(*) AS n FROM song_audio WHERE event_id=?',(sample_id,)).fetchone()['n'],0);self.assertEqual(c.execute('SELECT count(*) AS n FROM memory_albums WHERE event_id=?',(sample_id,)).fetchone()['n'],0)

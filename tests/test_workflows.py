@@ -6,7 +6,7 @@ import server
 class WorkflowCase(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.old_db=server.DB;server.DB=self.tmp.name+'/app.sqlite3'
-  self.env=patch.dict(os.environ,{'DEMO_MODE':'1','ALLOW_SANDBOX_OTP':'1','DEMO_ACCESS_PASSWORD':'','COOKIE_SECURE':'0','DATABASE_URL':''});self.env.start()
+  self.env=patch.dict(os.environ,{'APP_MODE':'test','DEMO_MODE':'1','ALLOW_SANDBOX_OTP':'1','DEMO_ACCESS_PASSWORD':'','COOKIE_SECURE':'0','DATABASE_URL':''});self.env.start()
   server.initialize();self.csrf={}
   self.http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler);self.url='http://127.0.0.1:'+str(self.http.server_port)
   threading.Thread(target=self.http.serve_forever,daemon=True).start()

@@ -1,3 +1,4 @@
+const {startSample,switchSampleRole}=require('./browser-fixtures.cjs');
 const {chromium,devices}=require('playwright');
 const fs=require('fs'),os=require('os'),path=require('path');
 (async()=>{
@@ -12,7 +13,7 @@ const fs=require('fs'),os=require('os'),path=require('path');
  await page.evaluate(()=>{
   const event=new Event('beforeinstallprompt',{cancelable:true});window.installPromptCalls=0;event.prompt=async()=>{window.installPromptCalls++};event.userChoice=Promise.resolve({outcome:'accepted'});window.dispatchEvent(event);
  });await page.locator('.install-entry').click();if(await page.evaluate(()=>window.installPromptCalls)!==1)throw Error('Native prompt not triggered');
- await page.evaluate(()=>window.dispatchEvent(new Event('appinstalled')));await page.getByRole('button',{name:'Explore Rahul & Priya’s wedding'}).click();await page.getByRole('heading',{name:'A beautiful celebration awaits.'}).waitFor();if(await page.locator('.install-entry').count())throw Error('Install entry returned after installation');
+ await page.evaluate(()=>window.dispatchEvent(new Event('appinstalled')));await startSample(page);await page.getByRole('heading',{name:'Your wedding, coming together.'}).waitFor();if(await page.locator('.install-entry').count())throw Error('Install entry returned after installation');
  if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('Phone overflow');
  const cacheApi=await page.evaluate(async()=>{for(const key of await caches.keys()){for(const request of await(await caches.open(key)).keys()){if(new URL(request.url).pathname.startsWith('/api/'))return true}}return false});if(cacheApi)throw Error('Private API responses cached');
  await context.setOffline(true);await page.reload();try{await page.getByRole('heading',{name:'The gate, on the go.'}).waitFor({timeout:8000})}catch(e){console.log('Offline diagnostic:',JSON.stringify(await page.evaluate(async()=>({online:navigator.onLine,body:document.body.innerText.slice(0,800),boot:typeof boot,offlineGate:typeof offlineGate,gatePresent:!!localStorage.getItem('shaadi-gate'),scripts:[...document.scripts].map(s=>s.src),cache:[...await caches.keys()]}))));console.log('Page errors:',errors);throw e}await context.setOffline(false);
