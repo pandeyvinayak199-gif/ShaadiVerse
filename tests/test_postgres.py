@@ -113,3 +113,16 @@ class PostgreSQLRelease(WorkflowCase):
    with server.conn() as c:
     self.assertEqual(c.execute('SELECT count(*) AS n FROM oauth_attempts').fetchone()['n'],0)
     for table in ['auth_accounts','oauth_attempts']:self.assertTrue(c.execute('SELECT relrowsecurity FROM pg_class WHERE oid=?::regclass',('shaadi_sync.'+table,)).fetchone()['relrowsecurity'])
+ def test_personal_invitation_concurrent_claims_have_one_guest(self):
+  import urllib.request
+  import test_google_auth as google_tests
+  self.start();self.opener=urllib.request.build_opener(google_tests.NoRedirect());self.get=lambda path,cookie=None:google_tests.GoogleSignIn.get(self,path,cookie);self.profile=lambda address,subject:google_tests.GoogleSignIn.profile(self,address,subject)
+  with patch.dict(os.environ,{'APP_MODE':'user','AUTH_PROVIDER':'google','SUPABASE_URL':'https://example.supabase.co','SUPABASE_PUBLISHABLE_KEY':'fixture-public','PUBLIC_BASE_URL':self.url}):
+   server.initialize();owner,_=google_tests.GoogleSignIn.sign_in(self);self.event(owner);status,invite,_=self.req('guest-invitations',{'name':'Invited guest'},owner);self.assertEqual(status,200,invite)
+   from urllib.parse import urlparse,parse_qs
+   token=parse_qs(urlparse(invite['url']).query)['invite'][0]
+   a,_=google_tests.GoogleSignIn.sign_in(self,'one@example.com','22222222-2222-4222-8222-222222222222');b,_=google_tests.GoogleSignIn.sign_in(self,'two@example.com','33333333-3333-4333-8333-333333333333')
+   with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(lambda cookie:self.req('guest-invitations/claim',{'token':token},cookie)[0],[a,b]))
+   self.assertEqual(results.count(200),1);self.assertTrue(all(code in [200,403,409] for code in results))
+   with server.conn() as c:
+    invitation=c.execute('SELECT claimed_by FROM guest_invitations WHERE token=?',(token,)).fetchone();self.assertTrue(invitation['claimed_by']);self.assertTrue(c.execute("SELECT relrowsecurity FROM pg_class WHERE oid='shaadi_sync.guest_invitations'::regclass").fetchone()['relrowsecurity'])

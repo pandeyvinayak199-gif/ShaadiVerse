@@ -1,5 +1,5 @@
-const CACHE='shaadi-shell-v16';
-const SHELL=['/','/style.css','/app.js','/help.js','/planning.js','/song-audio.js','/features.js','/onboarding.js','/memories-app.js','/memories','/memory-client.js','/memory-style.css','/install.js','/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png','/icons/maskable-512.png','/icons/apple-touch-icon.png','/palace.svg','/vendor/jsQR.js'];
+const CACHE='shaadi-shell-v17';
+const SHELL=['/','/style.css','/app.js','/help.js','/planning.js','/song-audio.js','/features.js','/onboarding.js','/guest-invitations.js','/memories-app.js','/memories','/memory-client.js','/memory-style.css','/install.js','/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png','/icons/maskable-512.png','/icons/apple-touch-icon.png','/palace.svg','/vendor/jsQR.js'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)));self.skipWaiting()});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('shaadi-shell-')&&k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim()});
 self.addEventListener('fetch',event=>{

@@ -67,3 +67,7 @@ node tests/browser-google-auth.cjs
 ```
 
 This fixture binds localhost, uses a fresh temporary SQLite database and mocks only provider responses. Never deploy the fixture script. The production server always verifies Google sign-in with Supabase over HTTPS. A real Google test-user consent check remains necessary after configuring the external accounts.
+
+### Personal invitations
+
+Guests → Create invitation generates a personalised RSVP message, private Guest login link and wedding-specific QR passes from the guest's name. Co-organisers can copy/share the message and download QR images. See [personal invitation access and QR rules](docs/PERSONAL_INVITATIONS.md). Time entry uses separate hour, minute and AM/PM choices.

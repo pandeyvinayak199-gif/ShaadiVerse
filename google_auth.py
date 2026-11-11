@@ -24,7 +24,7 @@ def start(db):
  url,key,base=configuration();attempt=secrets.token_urlsafe(32);verifier=secrets.token_urlsafe(48);challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
  with db(True) as c:
   c.execute('DELETE FROM oauth_attempts WHERE expires<?',(time.time(),));c.execute('INSERT INTO oauth_attempts VALUES(?,?,?)',(digest(attempt),verifier,time.time()+600))
- destination=url+'/auth/v1/authorize?'+urlencode({'provider':'google','redirect_to':base+'/auth/callback','code_challenge':challenge,'code_challenge_method':'s256'})
+ destination=url+'/auth/v1/authorize?'+urlencode({'provider':'google','prompt':'select_account','redirect_to':base+'/auth/callback','code_challenge':challenge,'code_challenge_method':'s256'})
  return destination,cookie(attempt,base.startswith('https://'))
 def request(url,key,body=None,token=None):
  headers={'apikey':key,'Accept':'application/json'}
@@ -76,9 +76,13 @@ def access_key(c,address):
 
 def grant(c,account,address):
  # Pending team grants are made by the wedding owner, never by a login parameter.
+ if os.environ.get('DATABASE_URL'):
+  events={r['event_id'] for r in c.execute('SELECT event_id FROM memberships WHERE phone=?',('email:'+address,))}
+  events.update(r['event_id'] for r in c.execute("SELECT event_id,data FROM records WHERE kind='guests'") if json.loads(r['data']).get('email','').lower()==address)
+  for eid in sorted(events):c.execute("SELECT id FROM records WHERE kind='event' AND event_id=? FOR UPDATE",(eid,))
  pending=c.execute('SELECT * FROM memberships WHERE phone=?',('email:'+address,)).fetchall()
  for m in pending:
-  c.execute('INSERT INTO memberships(event_id,phone,role,entity_id,permissions,revoked) VALUES(?,?,?,?,?,?) ON CONFLICT(event_id,phone) DO NOTHING',(m['event_id'],account,m['role'],m['entity_id'],m['permissions'],m['revoked']))
+  c.execute('INSERT INTO memberships(event_id,phone,role,entity_id,permissions,revoked) VALUES(?,?,?,?,?,?) ON CONFLICT(event_id,phone) DO UPDATE SET revoked=1 WHERE excluded.revoked=1',(m['event_id'],account,m['role'],m['entity_id'],m['permissions'],m['revoked']))
   c.execute('DELETE FROM memberships WHERE event_id=? AND phone=?',(m['event_id'],'email:'+address))
  for row in c.execute("SELECT id,event_id,data FROM records WHERE kind='guests'").fetchall():
   guest=json.loads(row['data'])

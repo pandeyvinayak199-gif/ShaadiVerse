@@ -5,7 +5,7 @@ from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, unquote, parse_qs, urlencode
-import storage, providers, memories, help_assistant, guest_planning, song_audio, google_auth
+import storage, providers, memories, help_assistant, guest_planning, song_audio, google_auth, invitations
 from seed import demo_records
 
 DB=os.environ.get('DATABASE_PATH','shaadi.sqlite3')
@@ -63,6 +63,9 @@ def remove_sample_workspaces(c):
     c.execute("DELETE FROM sessions WHERE auth_mode<>'verified' OR demo_role IS NOT NULL")
     c.execute("DELETE FROM challenges WHERE mode='sandbox'")
 
+def datetime_for_invitation(day):
+    from datetime import datetime,timezone,timedelta
+    return (datetime.fromisoformat(day).replace(tzinfo=timezone.utc)+timedelta(days=30)).timestamp()
 def owns_guest(g,s):return g['id']==s.get('entity_id') if s.get('entity_id') is not None else g.get('phone')==s['phone']
 def hash_token(t):return hashlib.sha256(t.encode()).hexdigest()
 def phone_number(raw):
@@ -209,6 +212,8 @@ class Handler(SimpleHTTPRequestHandler):
                 token=os.environ.get('WHATSAPP_VERIFY_TOKEN','')
                 if not token or query.get('hub.mode')!=['subscribe'] or not hmac.compare_digest(query.get('hub.verify_token',[''])[0],token):raise HTTPError(403,'Invalid verification token')
                 payload=query.get('hub.challenge',[''])[0].encode();self.send_response(200);self.end_headers();return self.wfile.write(payload)
+            if path=='/api/guest-invitation':
+                with conn() as c:return self.response(200,invitations.preview(c,query.get('token',[''])[0]))
             if path=='/api/invitation':
                 code=query.get('code',[''])[0]
                 with conn() as c:
@@ -230,6 +235,7 @@ class Handler(SimpleHTTPRequestHandler):
             target=(Path(__file__).parent/'static'/('index.html' if path=='/' else 'memories.html' if path=='/memories' else unquote(path).lstrip('/'))).resolve()
             if not target.is_relative_to((Path(__file__).parent/'static').resolve()) or not target.is_file():raise HTTPError(404,'Not found')
             content=target.read_bytes();self.send_response(200);self.send_header('Content-Type','application/manifest+json' if target.suffix=='.webmanifest' else self.guess_type(str(target)));self.send_header('X-Content-Type-Options','nosniff');self.send_header('Referrer-Policy','no-referrer' if path=='/memories' else 'same-origin');self.end_headers();self.wfile.write(content)
+        except invitations.InviteError as e:self.response(e.status,{'error':str(e)})
         except google_auth.AuthError as e:self.response(e.status,{'error':str(e)})
         except song_audio.AudioError as e:self.response(e.status,{'error':str(e)})
         except memories.AlbumError as e:self.response(e.status,{'error':str(e)})
@@ -340,7 +346,7 @@ class Handler(SimpleHTTPRequestHandler):
             for e in data['event']:e.pop('budget',None);e.pop('approvalThreshold',None)
         for g in data.get('guests',[]):g.pop('passNonce',None)
         if role in ['Super Organiser','Co-Organiser']:
-            for g in data.get('guests',[]):g['accessKey']=google_auth.access_key(c,g['email']) if g.get('email') else g.get('phone','')
+            for g in data.get('guests',[]):g['accessKey']=google_auth.access_key(c,g['email']) if g.get('email') else g.get('phone') or 'guest:'+str(g['id'])
         if role=='Super Organiser':
             data['team']=[dict(r) for r in c.execute('SELECT m.phone,m.role,m.permissions,m.revoked,a.email FROM memberships m LEFT JOIN auth_accounts a ON a.account_id=m.phone WHERE m.event_id=?',(eid,))]
             data['messages']=[dict(r) for r in c.execute('SELECT id,guest_id,status,error,created FROM outbox WHERE event_id=? ORDER BY id DESC LIMIT 50',(eid,))]
@@ -454,6 +460,8 @@ class Handler(SimpleHTTPRequestHandler):
         if path=='/api/messages/dispatch':return self.dispatch_messages()
         if path=='/api/payments/order':return self.order(b)
         if path=='/api/payments/verify':return self.verify_payment(b)
+        if path=='/api/guest-invitations':return self.create_guest_invitation(b)
+        if path=='/api/guest-invitations/claim':return self.claim_guest_invitation(b)
         if path=='/api/guest-limits':return self.guest_limits(b)
         if path=='/api/guest-profile':return self.guest_profile(b)
         if path.startswith('/api/vendor-payments/'):return self.vendor_payment(path,b)
@@ -564,14 +572,27 @@ class Handler(SimpleHTTPRequestHandler):
         if e['plan']=='Free' and len(rows('guests',self.s['event_id'],c))>=50:raise HTTPError(402,'Free events support 50 guests. Upgrade to Event Pass to add more.')
     def revoke(self,b):
         self.require_role('Super Organiser');raw=b.get('phone','');eid=self.s['event_id']
+        if raw.startswith('guest:'):
+            gid=guest_planning.integer(raw[6:],1,10**15)
+            with conn(True) as c:
+                if os.environ.get('DATABASE_URL'):c.execute("SELECT id FROM records WHERE kind='event' AND event_id=? FOR UPDATE",(eid,))
+                g=next((g for g in rows('guests',eid,c) if g['id']==gid),None)
+                if not g:raise HTTPError(404,'Guest not found in this wedding.')
+                c.execute('UPDATE guest_invitations SET revoked=1 WHERE event_id=? AND guest_id=?',(eid,gid));c.execute("UPDATE memberships SET revoked=1 WHERE event_id=? AND role='Guest' AND entity_id=?",(eid,gid));g['passNonce']=secrets.token_urlsafe(18);g['status']='Invited';update(c,'guests',g,eid);audit(c,self.s,'Revoked personal guest invitation #'+str(gid))
+            return self.response(200,{'ok':True})
         if re.fullmatch(r'google:[a-f0-9]{64}',raw):phone=raw
         elif raw.startswith('email:'):phone='email:'+google_auth.email(raw[6:])
         else:phone=phone_number(raw)
         if phone==self.s['phone']:raise HTTPError(400,'You cannot revoke your own organiser access.')
         with conn(True) as c:
+            if os.environ.get('DATABASE_URL'):c.execute("SELECT id FROM records WHERE kind='event' AND event_id=? FOR UPDATE",(eid,))
+            if raw.startswith('email:'):
+                phone=google_auth.access_key(c,google_auth.email(raw[6:]))
+                if phone==self.s['phone']:raise HTTPError(400,'You cannot revoke your own organiser access.')
             c.execute("INSERT INTO memberships(event_id,phone,role,permissions,revoked) VALUES(?,?,?,?,1) ON CONFLICT(event_id,phone) DO UPDATE SET revoked=1",(eid,phone,'Guest','[]'))
             for g in rows('guests',eid,c):
-                if g.get('phone')==phone or (g.get('email') and google_auth.access_key(c,g['email'])==phone):g['passNonce']=secrets.token_urlsafe(18);g['status']='Invited';update(c,'guests',g,eid)
+                if g.get('phone')==phone or (g.get('email') and google_auth.access_key(c,g['email'])==phone):
+                    c.execute('UPDATE guest_invitations SET revoked=1 WHERE event_id=? AND guest_id=?',(eid,g['id']));g['passNonce']=secrets.token_urlsafe(18);g['status']='Invited';update(c,'guests',g,eid)
             audit(c,self.s,'Revoked event member access')
         return self.response(200,{'ok':True})
     def save_record(self,b):
@@ -596,7 +617,7 @@ class Handler(SimpleHTTPRequestHandler):
                     c.execute('DELETE FROM event_codes WHERE event_id=?',(eid,));c.execute('INSERT INTO event_codes VALUES(?,?)',(data['code'],eid))
             elif kind=='guests':
                 data['name']=text(data.get('name'),80);data['email']=google_auth.email(data['email']) if data.get('email') else '';data['phone']=phone_number(data['phone']) if data.get('phone') else ''
-                if not data['phone'] and not data['email']:raise HTTPError(400,'Add a Google sign-in email or contact number.')
+                if not data['phone'] and not data['email'] and not (old and c.execute('SELECT token FROM guest_invitations WHERE event_id=? AND guest_id=?',(eid,old['id'])).fetchone()):raise HTTPError(400,'Add a Google sign-in email or create a personal invitation.')
                 data['plusOnes']=guest_planning.integer(data.get('plusOnes',guest_planning.limits(rows('event',eid,c)[0])['defaultPlusOnes']),0,100)
                 if data['plusOnes']>guest_planning.limits(rows('event',eid,c)[0])['maxPlusOnes']:raise HTTPError(400,'Plus-one allowance exceeds the limit in Settings.')
                 if old and data['plusOnes']<old.get('attendingPlusOnes',0):raise HTTPError(400,'This guest has already confirmed more plus-ones. Ask them to update their RSVP first.')
@@ -605,10 +626,10 @@ class Handler(SimpleHTTPRequestHandler):
                 if data['phone'] and any(g['phone']==data['phone'] and g['id']!=item.get('id') for g in rows('guests',eid,c)):raise HTTPError(409,'This phone number is already on the guest list.')
                 if not old:self.guest_capacity(c)
                 if data['email'] and any(g.get('email')==data['email'] and g['id']!=item.get('id') for g in rows('guests',eid,c)):raise HTTPError(409,'This email is already on the guest list.')
-                if old and data.get('email')!=old.get('email'):
+                if old and (data.get('email') or '')!=(old.get('email') or ''):
                     c.execute("UPDATE memberships SET revoked=1 WHERE event_id=? AND role='Guest' AND entity_id=?",(eid,old['id']));data['passNonce']=secrets.token_urlsafe(18)
                 if old and data['phone']!=old['phone'] and not data['email']:raise HTTPError(400,'Revoke the old guest and create a new invitation to change phone ownership.')
-                data['passNonce']=secrets.token_urlsafe(18) if old and data.get('email')!=old.get('email') else (old or {}).get('passNonce',secrets.token_urlsafe(18));data['whatsappConsent']=(old or {}).get('whatsappConsent',False)
+                data['passNonce']=secrets.token_urlsafe(18) if old and (data.get('email') or '')!=(old.get('email') or '') else (old or {}).get('passNonce',secrets.token_urlsafe(18));data['whatsappConsent']=(old or {}).get('whatsappConsent',False)
                 data.setdefault('events',['Wedding']);data.setdefault('family','Friends');data.setdefault('diet','Veg');data.setdefault('travel','Not updated')
             elif kind=='members':
                 data['email']=google_auth.email(data['email']) if data.get('email') else '';data['phone']=google_auth.access_key(c,data['email']) if data['email'] else phone_number(data.get('phone'));data['name']=text(data.get('name'),80);role=data.get('role','Finance Team')
@@ -644,6 +665,52 @@ class Handler(SimpleHTTPRequestHandler):
             else:data['id']=insert(c,kind,data,eid)
             audit(c,s,'Saved '+str(kind)+' #'+str(data['id']))
         return self.response(200,{'ok':True,'id':data['id']})
+    def create_guest_invitation(self,b):
+        self.can_manage('guests');eid=self.s['event_id']
+        with conn(True) as c:
+            if os.environ.get('DATABASE_URL'):c.execute("SELECT id FROM records WHERE kind='event' AND event_id=? FOR UPDATE",(eid,))
+            e=rows('event',eid,c)[0]
+            if b.get('guestId'):
+                g=next((g for g in rows('guests',eid,c) if g['id']==b['guestId']),None)
+                if not g:raise HTTPError(404,'Guest not found in this wedding.')
+            else:
+                self.guest_capacity(c);name=text(b.get('name'),80);address=google_auth.email(b['email']) if b.get('email') else ''
+                if address and any(g.get('email')==address for g in rows('guests',eid,c)):raise HTTPError(409,'This email already has a guest entry. Share that guest’s invitation instead.')
+                g={'name':name,'email':address,'phone':'','family':'Family','side':'Both','status':'Invited','diet':'Veg','plusOnes':guest_planning.limits(e)['defaultPlusOnes'],'events':[],'travel':'Not updated','whatsappConsent':False};g['id']=insert(c,'guests',g,eid)
+            current=c.execute('SELECT * FROM guest_invitations WHERE event_id=? AND guest_id=? AND revoked=0 AND expires>?',(eid,g['id'],time.time())).fetchone()
+            if b.get('replace') is True:
+                c.execute('UPDATE guest_invitations SET revoked=1 WHERE event_id=? AND guest_id=?',(eid,g['id']));g['passNonce']=secrets.token_urlsafe(18);update(c,'guests',g,eid);current=None
+            if not current:
+                bound=c.execute("SELECT phone FROM memberships WHERE event_id=? AND role='Guest' AND entity_id=? AND revoked=0",(eid,g['id'])).fetchone()
+                token=secrets.token_urlsafe(32);c.execute('INSERT INTO guest_invitations VALUES(?,?,?,?,?,?)',(token,eid,g['id'],bound['phone'] if bound else None,0,max(time.time()+180*86400,datetime_for_invitation(e['date']))))
+            else:token=current['token']
+            row,g,e=invitations.get(c,token);base=os.environ.get('PUBLIC_BASE_URL','').rstrip('/')
+            if not base:base=('https://' if os.environ.get('COOKIE_SECURE')=='1' else 'http://')+self.headers.get('Host','localhost')
+            url=base+'/?invite='+token;entry_token=pass_token(c,eid,g);body=invitations.message(c,row,{**g,'plusOnes':guest_planning.allowance(g,e)},e,url);audit(c,self.s,'Prepared personal guest invitation #'+str(g['id']))
+        return self.response(200,{'guestId':g['id'],'guestName':g['name'],'weddingName':e['name'],'url':url,'message':body,'invitationQr':invitations.qr(url),'entryQr':invitations.qr(entry_token),'invitationPng':invitations.png(url),'entryPng':invitations.png(entry_token),'entryToken':entry_token,'emailBound':bool(g.get('email'))})
+    def claim_guest_invitation(self,b):
+        if not self.s:raise HTTPError(401,'Please sign in with Google first.')
+        with conn(True) as c:
+            row,g,e=invitations.get(c,b.get('token'));eid=row['event_id'];account=self.s['phone']
+            if os.environ.get('DATABASE_URL'):
+                c.execute("SELECT id FROM records WHERE kind='event' AND event_id=? FOR UPDATE",(eid,));c.execute('SELECT token FROM guest_invitations WHERE token=? FOR UPDATE',(b.get('token'),))
+                row,g,e=invitations.get(c,b.get('token'))
+            identity=c.execute('SELECT email FROM auth_accounts WHERE account_id=?',(account,)).fetchone()
+            if not identity:raise HTTPError(403,'Use Google guest login to open this invitation.')
+            if g.get('email') and g['email'].lower()!=identity['email']:raise HTTPError(403,'This invitation is for a different Google email. Sign out and use the invited account.')
+            if row['claimed_by'] and row['claimed_by']!=account:raise HTTPError(409,'This personal invitation is already linked to another guest account.')
+            member=c.execute('SELECT * FROM memberships WHERE event_id=? AND phone=?',(eid,account)).fetchone()
+            if member and member['revoked']:raise HTTPError(403,'Your access was revoked. Contact your organiser.')
+            if member and (member['role']!='Guest' or member['entity_id']!=g['id']):raise HTTPError(409,'You already have another role in this wedding. Use the guest’s Google account.')
+            other=c.execute("SELECT phone FROM memberships WHERE event_id=? AND role='Guest' AND entity_id=? AND phone<>?",(eid,g['id'],account)).fetchone()
+            if other:raise HTTPError(409,'This guest is already linked to an account. Contact your organiser.')
+            pending=c.execute('SELECT revoked FROM memberships WHERE event_id=? AND phone=?',(eid,'email:'+identity['email'])).fetchone()
+            if pending and pending['revoked']:raise HTTPError(403,'This invitation’s access was revoked.')
+            if not g.get('email'):
+                g['email']=identity['email'];update(c,'guests',g,eid)
+            c.execute("INSERT INTO memberships(event_id,phone,role,entity_id,permissions) VALUES(?,?,?,?,?) ON CONFLICT(event_id,phone) DO NOTHING",(eid,account,'Guest',g['id'],'[]'))
+            c.execute('UPDATE guest_invitations SET claimed_by=? WHERE token=?',(account,row['token']));c.execute('UPDATE sessions SET event_id=? WHERE token_hash=?',(eid,self.s['token_hash']));audit(c,{**self.s,'event_id':eid},'Guest opened personal wedding invitation')
+        return self.response(200,{'ok':True,'eventId':eid,'guestName':g['name']})
     def guest_limits(self,b):
         self.can_manage('guests');eid=self.s['event_id'];settings=guest_planning.validate_limits(b.get('limits',{}));overrides=b.get('guests',[])
         if not isinstance(overrides,list):raise ValueError('Guest limits')

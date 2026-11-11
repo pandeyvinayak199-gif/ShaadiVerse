@@ -3,7 +3,7 @@ import os, sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-APP_TABLES=['records','audit','users','memberships','sessions','challenges','settings','limits','purchases','outbox','event_codes','webhook_events','feedback','memory_albums','memory_visitors','memory_photos','song_audio','auth_accounts','oauth_attempts']
+APP_TABLES=['records','audit','users','memberships','sessions','challenges','settings','limits','purchases','outbox','event_codes','webhook_events','feedback','memory_albums','memory_visitors','memory_photos','song_audio','auth_accounts','oauth_attempts','guest_invitations']
 
 class PGConnection:
     def __init__(self, url):
@@ -70,6 +70,7 @@ def migrate(path):
         CREATE TABLE IF NOT EXISTS audit(id {pk},actor TEXT,action TEXT,created DOUBLE PRECISION,event_id INTEGER NOT NULL DEFAULT 1);
         CREATE TABLE IF NOT EXISTS auth_accounts(account_id TEXT PRIMARY KEY,subject TEXT UNIQUE NOT NULL,email TEXT UNIQUE NOT NULL,created DOUBLE PRECISION NOT NULL);
         CREATE TABLE IF NOT EXISTS oauth_attempts(id TEXT PRIMARY KEY,verifier TEXT NOT NULL,expires DOUBLE PRECISION NOT NULL);
+        CREATE TABLE IF NOT EXISTS guest_invitations(token TEXT PRIMARY KEY,event_id INTEGER NOT NULL,guest_id BIGINT NOT NULL REFERENCES records(id) ON DELETE CASCADE,claimed_by TEXT,revoked INTEGER NOT NULL DEFAULT 0,expires DOUBLE PRECISION NOT NULL);
         CREATE TABLE IF NOT EXISTS users(phone TEXT PRIMARY KEY,name TEXT NOT NULL,created DOUBLE PRECISION NOT NULL);
         CREATE TABLE IF NOT EXISTS memberships(event_id INTEGER,phone TEXT,role TEXT NOT NULL,entity_id INTEGER,permissions TEXT NOT NULL DEFAULT '[]',revoked INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(event_id,phone));
         CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,phone TEXT,name TEXT,event_id INTEGER,csrf TEXT,expires DOUBLE PRECISION,demo_role TEXT,auth_mode TEXT NOT NULL DEFAULT 'legacy');
